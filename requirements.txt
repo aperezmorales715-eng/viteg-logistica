@@ -1,0 +1,11 @@
+streamlit
+mysql-connector-python
+pandas
+folium
+streamlit-folium
+streamlit-autorefresh
+streamlit-geolocation
+numpy
+scipy
+openpyxl
+streamlit-sortables
