@@ -50,15 +50,17 @@ if st.session_state.rol is None:
 def get_db():
     db = None
     try:
+        # Aquí usamos st.secrets para leer las credenciales que guardamos en la nube
         db = mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="",
-            database="viteg_logistica"
+            host=st.secrets["mysql.railway.internal"],
+            user=st.secrets["root"],
+            password=st.secrets["XoRvatJxOLWnNsigJRXGRGkzVHFVVxYu"],
+            database=st.secrets["railway"],
+            port=int(st.secrets["3306"])
         )
         yield db
     except mysql.connector.Error as e:
-        st.error(f"❌ Error de conexión a MariaDB: {e}")
+        st.error(f"❌ Error de conexión a la base de datos en la nube: {e}")
         yield None
     finally:
         if db and db.is_connected():
