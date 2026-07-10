@@ -203,6 +203,36 @@ with st.sidebar:
     st.markdown(f"**{rol_label}**")
     st.markdown(f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     st.markdown("---")
+
+    if st.session_state.rol == "admin":
+        st.markdown("### 📂 Navegación")
+        seccion = st.radio(
+            "Selecciona sección:",
+            [
+                "📍 Mapa",
+                "🚚 Panel Chofer",
+                "📝 Registro",
+                "📲 Preventa",
+                "📊 Administrador",
+                "📈 Reportes",
+            ],
+            key="nav_admin",
+            label_visibility="collapsed",
+        )
+    else:
+        st.markdown("### 📂 Navegación")
+        seccion_rep = st.radio(
+            "Selecciona sección:",
+            [
+                "🚚 Mi Ruta de Entrega",
+                "📝 Registrar Cliente",
+                "📲 Notificaciones de Preventa",
+            ],
+            key="nav_rep",
+            label_visibility="collapsed",
+        )
+
+    st.markdown("---")
     if st.button("🚪 Cerrar sesión", use_container_width=True):
         dialogo_cerrar_sesion()
 
@@ -260,17 +290,9 @@ if st.session_state.alerta_pendiente:
 # RENDERIZADO SEGÚN ROL
 # ==========================================
 if st.session_state.rol == "admin":
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📍 Mapa",
-        "🚚 Panel Chofer",
-        "📝 Registro",
-        "📲 Preventa",
-        "📊 Administrador",
-        "📈 Reportes"
-    ])
 
     # --- MAPA ---
-    with tab1:
+    if seccion == "📍 Mapa":
         st.subheader("🗺️ Monitoreo Geográfico de Pedidos")
         with get_db() as db:
             if db:
@@ -318,7 +340,7 @@ if st.session_state.rol == "admin":
                     st.error(f"Error al cargar el mapa: {e}")
 
     # --- PANEL CHOFER (admin) ---
-    with tab2:
+    if seccion == "🚚 Panel Chofer":
         st.subheader("🚚 Panel del Chofer")
         with get_db() as db:
             if db:
@@ -462,7 +484,7 @@ if st.session_state.rol == "admin":
                     st.error(f"Error: {e}")
 
     # --- REGISTRO ---
-    with tab3:
+    if seccion == "📝 Registro":
         st.subheader("📝 Registro de Pedidos")
         opciones_rutas = ["-- Escribir nueva ruta --"]
         with get_db() as db_rutas:
@@ -523,7 +545,7 @@ if st.session_state.rol == "admin":
                     st.error("Completa los campos obligatorios: Nombre y Ruta.")
 
     # --- PREVENTA ---
-    with tab4:
+    if seccion == "📲 Preventa":
         st.subheader("📲 Notificaciones y Preventa")
         plantilla_preventa = st.text_area("Plantilla de recordatorio (usa {nombre} y {ruta}):", value="Hola {nombre}, le escribimos de Agua VITEG 💧. Le recordamos que mañana el camión pasará por su zona ({ruta}). ¡Nos vemos pronto!", height=80)
         plantilla_pedido_listo = st.text_area("Plantilla de pedido listo:", value="Hola {nombre}, su pedido de Agua VITEG 💧 está listo y en camino. ¡Gracias!", height=80)
@@ -554,7 +576,7 @@ if st.session_state.rol == "admin":
                     st.error(f"Error en preventa: {e}")
 
     # --- ADMINISTRADOR ---
-    with tab5:
+    if seccion == "📊 Administrador":
         st.subheader("📊 Panel Administrador")
         streamlit_autorefresh.st_autorefresh(interval=15000, key="datarefresh")
         with get_db() as db:
@@ -614,7 +636,7 @@ if st.session_state.rol == "admin":
                     st.error(f"Error en panel administrador: {e}")
 
     # --- REPORTES ---
-    with tab6:
+    if seccion == "📈 Reportes":
         st.subheader("📈 Reportes y Análisis")
         with get_db() as db:
             if db:
@@ -653,14 +675,9 @@ if st.session_state.rol == "admin":
 # VISTA REPARTIDOR
 # ==========================================
 else:
-    tab_rep1, tab_rep2, tab_rep3 = st.tabs([
-        "🚚 Mi Ruta de Entrega",
-        "📝 Registrar Cliente",
-        "📲 Notificaciones de Preventa"
-    ])
 
     # --- RUTA REPARTIDOR ---
-    with tab_rep1:
+    if seccion_rep == "🚚 Mi Ruta de Entrega":
         st.subheader("🚚 Mi Ruta de Entrega")
         with get_db() as db:
             if db:
@@ -804,7 +821,7 @@ else:
                     st.error(f"Error: {e}")
 
     # --- REGISTRO REPARTIDOR ---
-    with tab_rep2:
+    if seccion_rep == "📝 Registrar Cliente":
         st.subheader("📝 Registrar Cliente")
         opciones_rutas_r = ["-- Escribir nueva ruta --"]
         with get_db() as db_rutas:
@@ -861,7 +878,7 @@ else:
                     st.error("Completa Nombre y Ruta.")
 
     # --- PREVENTA REPARTIDOR ---
-    with tab_rep3:
+    if seccion_rep == "📲 Notificaciones de Preventa":
         st.subheader("📲 Notificaciones de Preventa")
         plantilla_prev_r = st.text_area("Plantilla recordatorio:", value="Hola {nombre}, le escribimos de Agua VITEG 💧. Mañana el camión pasará por su zona ({ruta}). ¡Nos vemos!", height=80)
         st.divider()
