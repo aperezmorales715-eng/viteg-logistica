@@ -203,36 +203,6 @@ with st.sidebar:
     st.markdown(f"**{rol_label}**")
     st.markdown(f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     st.markdown("---")
-
-    if st.session_state.rol == "admin":
-        st.markdown("### 📂 Navegación")
-        seccion = st.radio(
-            "Selecciona sección:",
-            [
-                "📍 Mapa",
-                "🚚 Panel Chofer",
-                "📝 Registro",
-                "📲 Preventa",
-                "📊 Administrador",
-                "📈 Reportes",
-            ],
-            key="nav_admin",
-            label_visibility="collapsed",
-        )
-    else:
-        st.markdown("### 📂 Navegación")
-        seccion_rep = st.radio(
-            "Selecciona sección:",
-            [
-                "🚚 Mi Ruta de Entrega",
-                "📝 Registrar Cliente",
-                "📲 Notificaciones de Preventa",
-            ],
-            key="nav_rep",
-            label_visibility="collapsed",
-        )
-
-    st.markdown("---")
     if st.button("🚪 Cerrar sesión", use_container_width=True):
         dialogo_cerrar_sesion()
 
@@ -245,6 +215,34 @@ with col_logo:
 with col_titulo:
     st.title("🏭 Sistema de Gestión Logística - Embotelladora Agua VITEG")
     st.markdown("Panel de control interno para el monitoreo de rutas, despacho de repartidores y análisis de demanda.")
+
+# ==========================================
+# NAVEGACIÓN (selectbox — mejor experiencia en celular que tabs o sidebar)
+# ==========================================
+if st.session_state.rol == "admin":
+    seccion = st.selectbox(
+        "📂 Selecciona sección:",
+        [
+            "📍 Mapa",
+            "🚚 Panel Chofer",
+            "📝 Registro",
+            "📲 Preventa",
+            "📊 Administrador",
+            "📈 Reportes",
+        ],
+        key="nav_admin",
+    )
+else:
+    seccion_rep = st.selectbox(
+        "📂 Selecciona sección:",
+        [
+            "🚚 Mi Ruta de Entrega",
+            "📝 Registrar Cliente",
+            "📲 Notificaciones de Preventa",
+        ],
+        key="nav_rep",
+    )
+st.divider()
 
 # ==========================================
 # DETECCIÓN DE NUEVOS PEDIDOS
