@@ -27,7 +27,7 @@ if "rol" not in st.session_state:
     st.session_state.rol = None
 
 if st.session_state.rol is None:
-    st.image("logo.jpeg", width=200)
+    st.image("logo.jpeg", width=300)
     st.title("🏭 Agua VITEG — Acceso al Sistema")
     st.markdown("Ingresa tu clave para continuar.")
     clave = st.text_input("🔑 Contraseña:", type="password")
@@ -41,7 +41,6 @@ if st.session_state.rol is None:
         else:
             st.error("❌ Contraseña incorrecta.")
     st.stop()
-
 
 # ==========================================
 # CONEXIÓN A BD
@@ -59,7 +58,7 @@ def get_db():
         )
         yield db
     except mysql.connector.Error as e:
-        st.error(f"❌ Error: {e}")
+        st.error(f"❌ Error de conexión: {e}")
         yield None
     finally:
         if db and db.is_connected():
@@ -94,7 +93,6 @@ def exportar_excel(df):
     return output.getvalue()
 
 def optimizar_ruta(df):
-    """Algoritmo vecino más cercano para ordenar clientes por distancia mínima."""
     df = df.reset_index(drop=True)
     coords = df[['latitud', 'longitud']].values
     n = len(coords)
@@ -114,7 +112,7 @@ def optimizar_ruta(df):
     return df.iloc[orden].reset_index(drop=True)
 
 # ==========================================
-# DIÁLOGOS DE CONFIRMACIÓN
+# DIÁLOGOS
 # ==========================================
 @st.dialog("🚪 Cerrar sesión")
 def dialogo_cerrar_sesion():
@@ -127,6 +125,8 @@ def dialogo_cerrar_sesion():
     with c2:
         if st.button("❌ Cancelar", use_container_width=True):
             st.rerun()
+
+@st.dialog("⚠️ Confirmar reinicio de TODAS las rutas")
 def dialogo_reiniciar_todo():
     st.error("Esta acción marcará TODOS los pedidos como 'pendiente'. No se puede deshacer.")
     c1, c2 = st.columns(2)
@@ -186,13 +186,15 @@ defaults = {
     "df_ruta_ordenada": None,
     "orden_manual": None,
     "modo_reordenar": False,
+    "lista_ids_manual": [],
+    "lista_ids_ruta": None,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 # ==========================================
-# SIDEBAR CON LOGO Y CERRAR SESIÓN
+# SIDEBAR
 # ==========================================
 with st.sidebar:
     st.image("logo.jpeg", use_container_width=True)
@@ -205,7 +207,7 @@ with st.sidebar:
         dialogo_cerrar_sesion()
 
 # ==========================================
-# TÍTULO CON LOGO
+# TÍTULO
 # ==========================================
 col_logo, col_titulo = st.columns([1, 5])
 with col_logo:
@@ -225,11 +227,9 @@ with get_db() as db_alertas:
             total_actual, id_max_actual = cursor_conteo.fetchone()
             total_actual = total_actual or 0
             id_max_actual = id_max_actual or 0
-
             if st.session_state.ultimo_conteo_pedidos == 0:
                 st.session_state.ultimo_conteo_pedidos = total_actual
                 st.session_state.id_max_previo = id_max_actual
-
             if total_actual > st.session_state.ultimo_conteo_pedidos or id_max_actual > st.session_state.id_max_previo:
                 df_nuevo = pd.read_sql("SELECT nombre_cliente, ruta, referencia FROM pedidos ORDER BY id DESC LIMIT 1", db_alertas)
                 if not df_nuevo.empty:
@@ -257,598 +257,633 @@ if st.session_state.alerta_pendiente:
     st.divider()
 
 # ==========================================
-# PESTAÑAS SEGÚN ROL
+# RENDERIZADO SEGÚN ROL
 # ==========================================
 if st.session_state.rol == "admin":
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📍 Mapa de Distribución",
-        "🚚 Panel del Chofer",
-        "📝 Registro de Domicilios",
-        "📲 Notificaciones de Preventa",
-        "📊 Panel Administrador",
-        "📈 Reportes y Análisis"
+        "📍 Mapa",
+        "🚚 Panel Chofer",
+        "📝 Registro",
+        "📲 Preventa",
+        "📊 Administrador",
+        "📈 Reportes"
     ])
-else:
-    # Repartidor ve: su ruta, registro de clientes y preventa
-    tab2, tab3, tab4 = st.tabs([
-        "🚚 Mi Ruta de Entrega",
-        "📝 Registrar Cliente",
-        "📲 Notificaciones de Preventa"
-    ])
-    tab1 = tab5 = tab6 = None
 
-# ==========================================
-# TAB 1: MAPA — solo admin
-# ==========================================
-if tab1:
- with tab1:
-    st.subheader("🗺️ Monitoreo Geográfico de Pedidos")
-    with get_db() as db:
-        if db:
-            try:
-                df_mapa_todo = pd.read_sql("SELECT * FROM pedidos WHERE latitud != 0 AND longitud != 0", db)
-
-                # Forzar tipo numérico — si vienen como texto, folium falla silenciosamente
-                if not df_mapa_todo.empty:
-                    df_mapa_todo['latitud'] = pd.to_numeric(df_mapa_todo['latitud'], errors='coerce')
-                    df_mapa_todo['longitud'] = pd.to_numeric(df_mapa_todo['longitud'], errors='coerce')
-                    df_mapa_todo = df_mapa_todo.dropna(subset=['latitud', 'longitud'])
-
-                if not df_mapa_todo.empty:
-
-                    # FILTROS
-                    col_f1, col_f2 = st.columns(2)
-                    with col_f1:
-                        rutas_disponibles = ["Todas"] + sorted(df_mapa_todo['ruta'].dropna().unique().tolist())
-                        filtro_ruta = st.selectbox("🗂️ Filtrar por ruta:", rutas_disponibles, key="map_ruta_filter")
-                    with col_f2:
-                        filtro_estatus = st.selectbox("📌 Filtrar por estatus:", ["Todos", "Pendientes", "Entregados", "No Encontrados"], key="map_estatus_filter")
-
-                    # Aplicar filtro de ruta
-                    df_mapa = df_mapa_todo.copy()
-                    if filtro_ruta != "Todas":
-                        df_mapa = df_mapa[df_mapa['ruta'] == filtro_ruta]
-
-                    # Aplicar filtro de estatus
-                    mapa_filtros = {"Pendientes": "pendiente", "Entregados": "entregado", "No Encontrados": "no encontrado"}
-                    df_filtrado = df_mapa[df_mapa['estatus'] == mapa_filtros[filtro_estatus]] if filtro_estatus in mapa_filtros else df_mapa
-
-                    # Métricas del filtro actual
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Total visibles", len(df_mapa))
-                    c2.metric("⏳ Pendientes", len(df_mapa[df_mapa['estatus'] == 'pendiente']))
-                    c3.metric("✅ Entregados", len(df_mapa[df_mapa['estatus'] == 'entregado']))
-                    c4.metric("❌ No encontrados", len(df_mapa[df_mapa['estatus'] == 'no encontrado']))
-
-                    # Centro del mapa según filtro — validar que no sea NaN ni 0,0
-                    if not df_filtrado.empty and df_filtrado['latitud'].notna().any():
-                        centro_lat = df_filtrado['latitud'].mean()
-                        centro_lon = df_filtrado['longitud'].mean()
-                        if pd.isna(centro_lat) or pd.isna(centro_lon) or (centro_lat == 0 and centro_lon == 0):
+    # --- MAPA ---
+    with tab1:
+        st.subheader("🗺️ Monitoreo Geográfico de Pedidos")
+        with get_db() as db:
+            if db:
+                try:
+                    df_mapa_todo = pd.read_sql("SELECT * FROM pedidos WHERE latitud != 0 AND longitud != 0", db)
+                    if not df_mapa_todo.empty:
+                        df_mapa_todo['latitud'] = pd.to_numeric(df_mapa_todo['latitud'], errors='coerce')
+                        df_mapa_todo['longitud'] = pd.to_numeric(df_mapa_todo['longitud'], errors='coerce')
+                        df_mapa_todo = df_mapa_todo.dropna(subset=['latitud', 'longitud'])
+                    if not df_mapa_todo.empty:
+                        col_f1, col_f2 = st.columns(2)
+                        with col_f1:
+                            rutas_disponibles = ["Todas"] + sorted(df_mapa_todo['ruta'].dropna().unique().tolist())
+                            filtro_ruta = st.selectbox("🗂️ Filtrar por ruta:", rutas_disponibles, key="map_ruta_filter")
+                        with col_f2:
+                            filtro_estatus = st.selectbox("📌 Filtrar por estatus:", ["Todos", "Pendientes", "Entregados", "No Encontrados"], key="map_estatus_filter")
+                        df_mapa = df_mapa_todo.copy()
+                        if filtro_ruta != "Todas":
+                            df_mapa = df_mapa[df_mapa['ruta'] == filtro_ruta]
+                        mapa_filtros = {"Pendientes": "pendiente", "Entregados": "entregado", "No Encontrados": "no encontrado"}
+                        df_filtrado = df_mapa[df_mapa['estatus'] == mapa_filtros[filtro_estatus]] if filtro_estatus in mapa_filtros else df_mapa
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("Total visibles", len(df_mapa))
+                        c2.metric("⏳ Pendientes", len(df_mapa[df_mapa['estatus'] == 'pendiente']))
+                        c3.metric("✅ Entregados", len(df_mapa[df_mapa['estatus'] == 'entregado']))
+                        c4.metric("❌ No encontrados", len(df_mapa[df_mapa['estatus'] == 'no encontrado']))
+                        if not df_filtrado.empty and df_filtrado['latitud'].notna().any():
+                            centro_lat = df_filtrado['latitud'].mean()
+                            centro_lon = df_filtrado['longitud'].mean()
+                            if pd.isna(centro_lat) or pd.isna(centro_lon) or (centro_lat == 0 and centro_lon == 0):
+                                centro_lat, centro_lon = 19.3150, -98.2400
+                        else:
                             centro_lat, centro_lon = 19.3150, -98.2400
+                        m = folium.Map(location=[centro_lat, centro_lon], zoom_start=14 if filtro_ruta != "Todas" else 13)
+                        colores = {"pendiente": ("red", "info-sign"), "no encontrado": ("orange", "remove-sign")}
+                        for _, row in df_filtrado.iterrows():
+                            color, icono = colores.get(row['estatus'], ("green", "ok-sign"))
+                            url_gmaps = f"https://www.google.com/maps/search/?api=1&query={row['latitud']},{row['longitud']}"
+                            popup_text = f"<b>Cliente:</b> {row['nombre_cliente']}<br><b>Zona:</b> {row['ruta']}<br><b>Estatus:</b> {row['estatus'].upper()}<br><a href='{url_gmaps}' target='_blank'>📍 Ver en Google Maps</a>"
+                            folium.Marker(location=[row['latitud'], row['longitud']], popup=folium.Popup(popup_text, max_width=300), icon=folium.Icon(color=color, icon=icono)).add_to(m)
+                        st_folium(m, width=1200, height=500, returned_objects=[])
                     else:
-                        centro_lat, centro_lon = 19.3150, -98.2400
+                        st.info("No hay pedidos con coordenadas registradas.")
+                except Exception as e:
+                    st.error(f"Error al cargar el mapa: {e}")
 
-                    m = folium.Map(location=[centro_lat, centro_lon], zoom_start=14 if filtro_ruta != "Todas" else 13)
-                    colores = {"pendiente": ("red", "info-sign"), "no encontrado": ("orange", "remove-sign")}
-
-                    for _, row in df_filtrado.iterrows():
-                        color, icono = colores.get(row['estatus'], ("green", "ok-sign"))
-                        url_gmaps = f"https://www.google.com/maps/search/?api=1&query={row['latitud']},{row['longitud']}"
-                        popup_text = f"""
-                        <b>Cliente:</b> {row['nombre_cliente']}<br>
-                        <b>Zona:</b> {row['ruta']}<br>
-                        <b>Pedido:</b> {row['cantidad_20L']} de 20L | {row['cantidad_10L']} de 10L<br>
-                        <b>Estatus:</b> {row['estatus'].upper()}<br>
-                        <a href="{url_gmaps}" target="_blank" style="color:#1a73e8;font-weight:bold;">📍 Ver en Google Maps</a>
-                        """
-                        folium.Marker(
-                            location=[row['latitud'], row['longitud']],
-                            popup=folium.Popup(popup_text, max_width=300),
-                            icon=folium.Icon(color=color, icon=icono)
-                        ).add_to(m)
-
-                    st_folium(m, width=1200, height=500, returned_objects=[])
-
-                    if df_filtrado.empty:
-                        st.info("No hay pedidos que coincidan con los filtros seleccionados.")
-                else:
-                    st.info("No hay pedidos con coordenadas registradas o las coordenadas no son válidas.")
-            except Exception as e:
-                st.error(f"Error al cargar el mapa: {e}")
-
-# ==========================================
-# TAB 2: PANEL DEL CHOFER con optimización
-# ==========================================
-with tab2:
-    st.subheader("🚚 Hoja de Ruta e Interacción con el Cliente")
-
-    with get_db() as db:
-        if db:
-            try:
-                df_chofer = pd.read_sql(
-                    "SELECT id, nombre_cliente, telefono, ruta, cantidad_20L, cantidad_10L, referencia, estatus, latitud, longitud FROM pedidos WHERE estatus != 'entregado'",
-                    db
-                )
-                if not df_chofer.empty:
-                    rutas_chofer = sorted(list(df_chofer['ruta'].unique()))
-                    ruta_sel = st.selectbox("Selecciona tu Ruta / Zona:", rutas_chofer, key="chofer_ruta_sel")
-
-                    # Si cambia la ruta, resetear todo
-                    if st.session_state.ruta_sel_previa != ruta_sel:
-                        st.session_state.ruta_optimizada = False
-                        st.session_state.df_ruta_ordenada = None
-                        st.session_state.orden_manual = None
-                        st.session_state.modo_reordenar = False
-                        st.session_state.ruta_sel_previa = ruta_sel
-
-                    df_ruta_base = df_chofer[df_chofer['ruta'] == ruta_sel].copy()
-                    total_ruta = len(df_ruta_base)
-
-                    # Progreso
-                    with get_db() as db2:
-                        if db2:
-                            df_todos = pd.read_sql("SELECT estatus FROM pedidos WHERE ruta = %s", db2, params=(ruta_sel,))
-                            entregados_hoy = len(df_todos[df_todos['estatus'] == 'entregado'])
-                            total_ruta_completa = len(df_todos)
-
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("📦 Pendientes", total_ruta)
-                    c2.metric("✅ Entregados", entregados_hoy)
-                    progreso = int((entregados_hoy / total_ruta_completa) * 100) if total_ruta_completa > 0 else 0
-                    c3.metric("📊 Progreso", f"{progreso}%")
-                    st.progress(progreso / 100)
-
-                    st.divider()
-
-                    # ---- BOTONES DE OPTIMIZACIÓN ----
-                    coords_validas = df_ruta_base[(df_ruta_base['latitud'] != 0) & (df_ruta_base['longitud'] != 0)].copy()
-                    sin_coords = df_ruta_base[(df_ruta_base['latitud'] == 0) | (df_ruta_base['longitud'] == 0)].copy()
-
-                    col_opt1, col_opt2, col_opt3 = st.columns(3)
-                    with col_opt1:
-                        btn_optimizar = st.button("🧭 OPTIMIZAR CON IA", use_container_width=True, type="primary")
-                    with col_opt2:
-                        btn_reordenar = st.button("✋ AJUSTAR ORDEN MANUALMENTE", use_container_width=True)
-                    with col_opt3:
-                        btn_original = st.button("↩️ Orden original", use_container_width=True)
-
-                    if btn_optimizar:
-                        if len(coords_validas) >= 2:
-                            df_optimizado = pd.concat([optimizar_ruta(coords_validas), sin_coords]).reset_index(drop=True)
-                            st.session_state.df_ruta_ordenada = df_optimizado
-                            st.session_state.orden_manual = None
-                            st.session_state.ruta_optimizada = True
-                            st.session_state.modo_reordenar = False
-                        else:
-                            st.warning("⚠️ Se necesitan al menos 2 clientes con coordenadas GPS para optimizar.")
-
-                    if btn_reordenar:
-                        st.session_state.modo_reordenar = True
-
-                    if btn_original:
-                        st.session_state.ruta_optimizada = False
-                        st.session_state.df_ruta_ordenada = None
-                        st.session_state.orden_manual = None
-                        st.session_state.modo_reordenar = False
-
-                    # Decidir qué lista usar como base
-                    if st.session_state.ruta_optimizada and st.session_state.df_ruta_ordenada is not None:
-                        df_ruta_actual = st.session_state.df_ruta_ordenada.copy()
-                        st.success("✅ Ruta optimizada por IA.")
-                    elif st.session_state.orden_manual is not None:
-                        df_ruta_actual = st.session_state.orden_manual.copy()
-                        st.success("✅ Orden ajustado manualmente.")
-                    else:
-                        df_ruta_actual = df_ruta_base.copy()
-
-                    # ---- MODO REORDENAMIENTO MANUAL CON FLECHAS ----
-                    if st.session_state.modo_reordenar:
-                        st.markdown("### ✋ Ajusta el orden manualmente")
-                        st.info("Usa ⬆️ y ⬇️ para mover cada cliente. Cuando termines presiona 'Confirmar orden'.")
-
-                        # Inicializar lista de IDs si no existe
-                        if "lista_ids_manual" not in st.session_state or st.session_state.get("lista_ids_ruta") != ruta_sel:
-                            st.session_state.lista_ids_manual = list(df_ruta_actual['id'])
-                            st.session_state.lista_ids_ruta = ruta_sel
-
-                        ids_orden = st.session_state.lista_ids_manual
-                        df_orden = df_ruta_actual.set_index('id').loc[ids_orden].reset_index()
-
-                        for i, (_, row) in enumerate(df_orden.iterrows()):
-                            col_n, col_u, col_d = st.columns([6, 1, 1])
-                            col_n.write(f"**#{i+1}** — {row['nombre_cliente']}")
-                            if i > 0:
-                                if col_u.button("⬆️", key=f"up_{row['id']}_{i}"):
-                                    ids_orden[i], ids_orden[i-1] = ids_orden[i-1], ids_orden[i]
-                                    st.session_state.lista_ids_manual = ids_orden
-                                    st.rerun()
-                            if i < len(df_orden) - 1:
-                                if col_d.button("⬇️", key=f"dn_{row['id']}_{i}"):
-                                    ids_orden[i], ids_orden[i+1] = ids_orden[i+1], ids_orden[i]
-                                    st.session_state.lista_ids_manual = ids_orden
-                                    st.rerun()
-
-                        if st.button("✅ Confirmar orden", type="primary", use_container_width=True):
-                            df_manual = df_ruta_actual.set_index('id').loc[st.session_state.lista_ids_manual].reset_index()
-                            st.session_state.orden_manual = df_manual
+    # --- PANEL CHOFER (admin) ---
+    with tab2:
+        st.subheader("🚚 Panel del Chofer")
+        with get_db() as db:
+            if db:
+                try:
+                    df_chofer = pd.read_sql("SELECT id, nombre_cliente, telefono, ruta, cantidad_20L, cantidad_10L, referencia, estatus, latitud, longitud FROM pedidos WHERE estatus != 'entregado'", db)
+                    if not df_chofer.empty:
+                        rutas_chofer = sorted(list(df_chofer['ruta'].unique()))
+                        ruta_sel = st.selectbox("Selecciona tu Ruta / Zona:", rutas_chofer, key="chofer_ruta_sel_admin")
+                        if st.session_state.ruta_sel_previa != ruta_sel:
                             st.session_state.ruta_optimizada = False
+                            st.session_state.df_ruta_ordenada = None
+                            st.session_state.orden_manual = None
                             st.session_state.modo_reordenar = False
-                            st.rerun()
-
+                            st.session_state.ruta_sel_previa = ruta_sel
+                        df_ruta_base = df_chofer[df_chofer['ruta'] == ruta_sel].copy()
+                        total_ruta = len(df_ruta_base)
+                        with get_db() as db2:
+                            if db2:
+                                df_todos = pd.read_sql("SELECT estatus FROM pedidos WHERE ruta = %s", db2, params=(ruta_sel,))
+                                entregados_hoy = len(df_todos[df_todos['estatus'] == 'entregado'])
+                                total_ruta_completa = len(df_todos)
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("📦 Pendientes", total_ruta)
+                        c2.metric("✅ Entregados", entregados_hoy)
+                        progreso = int((entregados_hoy / total_ruta_completa) * 100) if total_ruta_completa > 0 else 0
+                        c3.metric("📊 Progreso", f"{progreso}%")
+                        st.progress(progreso / 100)
                         st.divider()
-
-                    # Botón Google Maps simple
-                    df_maps = df_ruta_actual[(df_ruta_actual['latitud'] != 0) & (df_ruta_actual['longitud'] != 0)]
-                    if len(df_maps) > 1:
-                        origen  = f"{df_maps.iloc[0]['latitud']},{df_maps.iloc[0]['longitud']}"
-                        destino = f"{df_maps.iloc[-1]['latitud']},{df_maps.iloc[-1]['longitud']}"
-                        url_ruta_completa = f"https://www.google.com/maps/dir/{origen}/{destino}"
-                        if st.session_state.orden_manual is not None:
-                            label = "🗺️ VER RUTA AJUSTADA EN GOOGLE MAPS"
-                        elif st.session_state.ruta_optimizada:
-                            label = "🗺️ VER RUTA OPTIMIZADA EN GOOGLE MAPS"
+                        coords_validas = df_ruta_base[(df_ruta_base['latitud'] != 0) & (df_ruta_base['longitud'] != 0)].copy()
+                        sin_coords = df_ruta_base[(df_ruta_base['latitud'] == 0) | (df_ruta_base['longitud'] == 0)].copy()
+                        col_opt1, col_opt2, col_opt3 = st.columns(3)
+                        with col_opt1:
+                            btn_optimizar = st.button("🧭 OPTIMIZAR CON IA", use_container_width=True, type="primary", key="opt_admin")
+                        with col_opt2:
+                            btn_reordenar = st.button("✋ AJUSTAR MANUALMENTE", use_container_width=True, key="rea_admin")
+                        with col_opt3:
+                            btn_original = st.button("↩️ Orden original", use_container_width=True, key="ori_admin")
+                        if btn_optimizar:
+                            if len(coords_validas) >= 2:
+                                df_optimizado = pd.concat([optimizar_ruta(coords_validas), sin_coords]).reset_index(drop=True)
+                                st.session_state.df_ruta_ordenada = df_optimizado
+                                st.session_state.orden_manual = None
+                                st.session_state.ruta_optimizada = True
+                                st.session_state.modo_reordenar = False
+                            else:
+                                st.warning("⚠️ Se necesitan al menos 2 clientes con GPS para optimizar.")
+                        if btn_reordenar:
+                            st.session_state.modo_reordenar = True
+                        if btn_original:
+                            st.session_state.ruta_optimizada = False
+                            st.session_state.df_ruta_ordenada = None
+                            st.session_state.orden_manual = None
+                            st.session_state.modo_reordenar = False
+                        if st.session_state.ruta_optimizada and st.session_state.df_ruta_ordenada is not None:
+                            df_ruta_actual = st.session_state.df_ruta_ordenada.copy()
+                            st.success("✅ Ruta optimizada por IA.")
+                        elif st.session_state.orden_manual is not None:
+                            df_ruta_actual = st.session_state.orden_manual.copy()
+                            st.success("✅ Orden ajustado manualmente.")
                         else:
-                            label = "🗺️ VER RUTA COMPLETA EN GOOGLE MAPS"
-                        st.markdown(
-                            f'<a href="{url_ruta_completa}" target="_blank"><button style="background-color:#34A853;color:white;border:none;padding:12px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;font-size:15px;margin-bottom:10px;">{label}</button></a>',
-                            unsafe_allow_html=True
-                        )
-                    elif len(df_maps) == 1:
-                        st.info("Solo 1 cliente con GPS, no se puede trazar ruta.")
-                    else:
-                        st.warning("⚠️ Ningún cliente tiene coordenadas GPS en esta ruta.")
-
-                    st.divider()
-                    if st.session_state.orden_manual is not None:
-                        titulo_lista = "✋ Orden ajustado manualmente"
-                    elif st.session_state.ruta_optimizada:
-                        titulo_lista = "🧭 Orden optimizado por IA"
-                    else:
-                        titulo_lista = "📋 Pedidos activos"
-                    st.markdown(f"### {titulo_lista}: {ruta_sel} ({total_ruta} restantes)")
-
-                    for idx, (_, row) in enumerate(df_ruta_actual.iterrows(), start=1):
-                        num_tel = str(row['telefono']).strip() if row['telefono'] else "S/N"
-                        prefix_icon = "⏳" if row['estatus'] == 'pendiente' else "❌"
-                        num_parada = f"#{idx} — " if st.session_state.ruta_optimizada else ""
-
-                        with st.expander(f"{prefix_icon} {num_parada}{row['nombre_cliente']} | {num_tel} [{row['estatus'].upper()}]"):
-                            st.write(f"🛒 {row['cantidad_20L']} Garrafones 20L | {row['cantidad_10L']} Garrafones 10L")
-                            st.write(f"🏠 Referencias: {row['referencia']}")
-
-                            if row['latitud'] != 0 and row['longitud'] != 0:
-                                url_gmaps = f"https://www.google.com/maps/search/?api=1&query={row['latitud']},{row['longitud']}"
-                                st.markdown(
-                                    f'<a href="{url_gmaps}" target="_blank"><button style="background-color:#1a73e8;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;margin-bottom:8px;">🗺️ NAVEGAR A ESTE CLIENTE</button></a>',
-                                    unsafe_allow_html=True
-                                )
-                            else:
-                                st.warning("⚠️ Sin coordenadas geográficas.")
-
-                            if num_tel != "S/N" and len(num_tel) >= 10:
-                                c_comm1, c_comm2, c_comm3 = st.columns(3)
-                                with c_comm1:
-                                    st.markdown(f'<a href="tel:{num_tel}"><button style="background-color:#007BFF;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">📞 LLAMAR</button></a>', unsafe_allow_html=True)
-                                with c_comm2:
-                                    msg_afuera = "Hola, le avisamos de Agua VITEG 💧. El camión repartidor ya está afuera de su domicilio. ¡Gracias!"
-                                    st.markdown(f'<a href="{enviar_whatsapp_link(num_tel, msg_afuera)}" target="_blank"><button style="background-color:#25D366;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">📲 YA ESTOY AFUERA</button></a>', unsafe_allow_html=True)
-                                with c_comm3:
-                                    msg_entregado = f"Hola {row['nombre_cliente']}, su pedido de Agua VITEG 💧 fue entregado. ¡Gracias!"
-                                    st.markdown(f'<a href="{enviar_whatsapp_link(num_tel, msg_entregado)}" target="_blank"><button style="background-color:#128C7E;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">✅ CONFIRMAR ENTREGA</button></a>', unsafe_allow_html=True)
-                            else:
-                                st.warning("⚠️ Sin teléfono válido.")
-
-                            st.markdown("---")
-                            col_est1, col_est2 = st.columns(2)
-                            with col_est1:
-                                if st.button("✅ Marcar Entregado", key=f"btn_ent_{row['id']}"):
-                                    cursor = db.cursor()
-                                    cursor.execute("UPDATE pedidos SET estatus = 'entregado' WHERE id = %s", (row['id'],))
-                                    db.commit()
-                                    cursor.close()
-                                    st.session_state.ruta_optimizada = False
-                                    st.session_state.df_ruta_ordenada = None
-                                    st.rerun()
-                            with col_est2:
-                                if row['estatus'] != 'no encontrado':
-                                    if st.button("❌ No Encontrado", key=f"btn_no_enc_{row['id']}"):
+                            df_ruta_actual = df_ruta_base.copy()
+                        if st.session_state.modo_reordenar:
+                            st.markdown("### ✋ Ajusta el orden manualmente")
+                            if "lista_ids_manual" not in st.session_state or st.session_state.lista_ids_ruta != ruta_sel:
+                                st.session_state.lista_ids_manual = list(df_ruta_actual['id'])
+                                st.session_state.lista_ids_ruta = ruta_sel
+                            ids_orden = st.session_state.lista_ids_manual
+                            df_orden = df_ruta_actual.set_index('id').loc[ids_orden].reset_index()
+                            for i, (_, row) in enumerate(df_orden.iterrows()):
+                                col_n, col_u, col_d = st.columns([6, 1, 1])
+                                col_n.write(f"**#{i+1}** — {row['nombre_cliente']}")
+                                if i > 0:
+                                    if col_u.button("⬆️", key=f"up_a_{row['id']}_{i}"):
+                                        ids_orden[i], ids_orden[i-1] = ids_orden[i-1], ids_orden[i]
+                                        st.session_state.lista_ids_manual = ids_orden
+                                        st.rerun()
+                                if i < len(df_orden) - 1:
+                                    if col_d.button("⬇️", key=f"dn_a_{row['id']}_{i}"):
+                                        ids_orden[i], ids_orden[i+1] = ids_orden[i+1], ids_orden[i]
+                                        st.session_state.lista_ids_manual = ids_orden
+                                        st.rerun()
+                            if st.button("✅ Confirmar orden", type="primary", use_container_width=True, key="conf_admin"):
+                                df_manual = df_ruta_actual.set_index('id').loc[st.session_state.lista_ids_manual].reset_index()
+                                st.session_state.orden_manual = df_manual
+                                st.session_state.ruta_optimizada = False
+                                st.session_state.modo_reordenar = False
+                                st.rerun()
+                            st.divider()
+                        df_maps = df_ruta_actual[(df_ruta_actual['latitud'] != 0) & (df_ruta_actual['longitud'] != 0)]
+                        if len(df_maps) > 1:
+                            origen = f"{df_maps.iloc[0]['latitud']},{df_maps.iloc[0]['longitud']}"
+                            destino = f"{df_maps.iloc[-1]['latitud']},{df_maps.iloc[-1]['longitud']}"
+                            url_ruta_completa = f"https://www.google.com/maps/dir/{origen}/{destino}"
+                            label = "🗺️ VER RUTA OPTIMIZADA" if st.session_state.ruta_optimizada else "🗺️ VER RUTA COMPLETA"
+                            st.markdown(f'<a href="{url_ruta_completa}" target="_blank"><button style="background-color:#34A853;color:white;border:none;padding:12px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;font-size:15px;margin-bottom:10px;">{label}</button></a>', unsafe_allow_html=True)
+                        st.divider()
+                        titulo_lista = "🧭 Orden optimizado" if st.session_state.ruta_optimizada else "📋 Pedidos activos"
+                        st.markdown(f"### {titulo_lista}: {ruta_sel} ({total_ruta} restantes)")
+                        for idx, (_, row) in enumerate(df_ruta_actual.iterrows(), start=1):
+                            num_tel = str(row['telefono']).strip() if row['telefono'] else "S/N"
+                            prefix_icon = "⏳" if row['estatus'] == 'pendiente' else "❌"
+                            num_parada = f"#{idx} — " if st.session_state.ruta_optimizada else ""
+                            with st.expander(f"{prefix_icon} {num_parada}{row['nombre_cliente']} | {num_tel}"):
+                                st.write(f"🛒 {row['cantidad_20L']} Garrafones 20L | {row['cantidad_10L']} Garrafones 10L")
+                                st.write(f"🏠 Referencias: {row['referencia']}")
+                                if row['latitud'] != 0 and row['longitud'] != 0:
+                                    url_gmaps = f"https://www.google.com/maps/search/?api=1&query={row['latitud']},{row['longitud']}"
+                                    st.markdown(f'<a href="{url_gmaps}" target="_blank"><button style="background-color:#1a73e8;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">🗺️ NAVEGAR</button></a>', unsafe_allow_html=True)
+                                if num_tel != "S/N" and len(num_tel) >= 10:
+                                    c1, c2, c3 = st.columns(3)
+                                    with c1:
+                                        st.markdown(f'<a href="tel:{num_tel}"><button style="background-color:#007BFF;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">📞 LLAMAR</button></a>', unsafe_allow_html=True)
+                                    with c2:
+                                        msg_afuera = "Hola, le avisamos de Agua VITEG 💧. El camión ya está afuera. ¡Gracias!"
+                                        st.markdown(f'<a href="{enviar_whatsapp_link(num_tel, msg_afuera)}" target="_blank"><button style="background-color:#25D366;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">📲 YA ESTOY AFUERA</button></a>', unsafe_allow_html=True)
+                                    with c3:
+                                        msg_ent = f"Hola {row['nombre_cliente']}, su pedido de Agua VITEG 💧 fue entregado. ¡Gracias!"
+                                        st.markdown(f'<a href="{enviar_whatsapp_link(num_tel, msg_ent)}" target="_blank"><button style="background-color:#128C7E;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">✅ CONFIRMAR</button></a>', unsafe_allow_html=True)
+                                st.markdown("---")
+                                col_e1, col_e2 = st.columns(2)
+                                with col_e1:
+                                    if st.button("✅ Marcar Entregado", key=f"ent_a_{row['id']}"):
                                         cursor = db.cursor()
-                                        cursor.execute("UPDATE pedidos SET estatus = 'no encontrado' WHERE id = %s", (row['id'],))
+                                        cursor.execute("UPDATE pedidos SET estatus = 'entregado' WHERE id = %s", (row['id'],))
                                         db.commit()
                                         cursor.close()
                                         st.session_state.ruta_optimizada = False
                                         st.session_state.df_ruta_ordenada = None
                                         st.rerun()
-                else:
-                    st.success("🚚 ¡Excelente! No hay pedidos pendientes en esta ruta.")
-            except Exception as e:
-                st.error(f"Error en panel del chofer: {e}")
-
-# ==========================================
-# TAB 3: REGISTRO DE DOMICILIOS — solo admin
-# ==========================================
-if tab3:
- with tab3:
-    st.subheader("📝 Registro de Pedidos")
-
-    opciones_rutas = ["-- Escribir nueva ruta --"]
-    with get_db() as db_rutas:
-        if db_rutas:
-            cursor_r = db_rutas.cursor()
-            cursor_r.execute("SELECT DISTINCT ruta FROM pedidos WHERE ruta IS NOT NULL AND ruta != ''")
-            for row_r in cursor_r.fetchall():
-                if row_r[0] not in opciones_rutas:
-                    opciones_rutas.append(row_r[0])
-            cursor_r.close()
-
-    st.markdown("### 🔍 Buscador de Clientes")
-    busqueda = st.text_input("Buscar por nombre o teléfono:")
-    if busqueda:
-        with get_db() as db_bus:
-            if db_bus:
-                df_bus = pd.read_sql(
-                    "SELECT id, nombre_cliente, telefono, ruta, referencia, estatus FROM pedidos WHERE nombre_cliente LIKE %s OR telefono LIKE %s",
-                    db_bus, params=(f"%{busqueda}%", f"%{busqueda}%")
-                )
-                if not df_bus.empty:
-                    st.dataframe(df_bus, use_container_width=True)
-                else:
-                    st.info("No se encontraron resultados.")
-
-    st.divider()
-    st.markdown("### ➕ Nuevo Cliente / Pedido")
-
-    location = streamlit_geolocation()
-    lat_val, lon_val = 0.0, 0.0
-    if location and isinstance(location, dict) and location.get("latitude") is not None:
-        lat_val = float(location["latitude"])
-        lon_val = float(location["longitude"])
-
-    with st.form("alta_manual_planta", clear_on_submit=True):
-        col_form1, col_form2 = st.columns(2)
-        with col_form1:
-            nom = st.text_input("Nombre completo del Cliente:*")
-            tel = st.text_input("Teléfono Celular:")
-            sel_ruta = st.selectbox("Ruta:", opciones_rutas)
-            rut = st.text_input("Nueva ruta:") if sel_ruta == "-- Escribir nueva ruta --" else sel_ruta
-            cant_20 = st.number_input("Garrafones 20L:", min_value=0, value=0)
-            cant_10 = st.number_input("Garrafones 10L:", min_value=0, value=0)
-        with col_form2:
-            lat_f = st.number_input("Latitud:", value=lat_val, format="%.6f")
-            lon_f = st.number_input("Longitud:", value=lon_val, format="%.6f")
-            ref = st.text_input("Referencias del domicilio:")
-
-        if st.form_submit_button("💾 Guardar y Registrar", use_container_width=True):
-            if nom and rut and rut.strip():
-                with get_db() as db_alta:
-                    if db_alta:
-                        try:
-                            cursor_a = db_alta.cursor()
-                            cursor_a.execute(
-                                "INSERT INTO pedidos (nombre_cliente, telefono, ruta, cantidad_20L, cantidad_10L, referencia, estatus, latitud, longitud, direccion) VALUES (%s, %s, %s, %s, %s, %s, 'pendiente', %s, %s, '')",
-                                (nom, tel, rut, cant_20, cant_10, ref, lat_f, lon_f)
-                            )
-                            db_alta.commit()
-                            cursor_a.close()
-                            if tel and len(str(tel).strip()) >= 10:
-                                msg_confirmacion = f"Hola {nom}, su pedido de Agua VITEG 💧 fue registrado. Pronto pasará el repartidor. ¡Gracias!"
-                                link_conf = enviar_whatsapp_link(tel, msg_confirmacion)
-                                st.success(f"🎉 Cliente '{nom}' registrado en ruta: {rut}")
-                                st.markdown(f'<a href="{link_conf}" target="_blank"><button style="background-color:#25D366;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;">📲 Enviar confirmación por WhatsApp</button></a>', unsafe_allow_html=True)
-                            else:
-                                st.success(f"🎉 Cliente '{nom}' registrado en ruta: {rut}")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al registrar: {e}")
-            else:
-                st.error("Completa los campos obligatorios: Nombre y Ruta.")
-
-# ==========================================
-# TAB 4: NOTIFICACIONES — solo admin
-# ==========================================
-if tab4:
- with tab4:
-    st.subheader("📲 Notificaciones y Preventa")
-
-    st.markdown("### ✏️ Plantillas de Mensajes")
-    plantilla_preventa = st.text_area(
-        "Plantilla de recordatorio (usa {nombre} y {ruta}):",
-        value="Hola {nombre}, le escribimos de Agua VITEG 💧. Le recordamos que mañana el camión pasará por su zona ({ruta}). ¡Nos vemos pronto!",
-        height=80
-    )
-    plantilla_pedido_listo = st.text_area(
-        "Plantilla de pedido listo:",
-        value="Hola {nombre}, su pedido de Agua VITEG 💧 está listo y en camino. ¡Gracias por su preferencia!",
-        height=80
-    )
-    st.divider()
-
-    with get_db() as db:
-        if db:
-            try:
-                df_notif = pd.read_sql("SELECT nombre_cliente, telefono, ruta FROM pedidos", db)
-                if not df_notif.empty:
-                    rutas_notif = sorted([r.strip() for r in df_notif['ruta'].unique() if r])
-                    ruta_notif_sel = st.selectbox("Seleccionar Ruta:", rutas_notif)
-                    df_clientes_ruta = df_notif[df_notif['ruta'] == ruta_notif_sel]
-                    st.markdown(f"**{len(df_clientes_ruta)} clientes en esta ruta**")
-                    st.divider()
-                    for _, row_c in df_clientes_ruta.iterrows():
-                        nombre = row_c['nombre_cliente']
-                        telefono = str(row_c['telefono']).strip() if row_c['telefono'] else ""
-                        if telefono and telefono != "S/N" and len(telefono) >= 10:
-                            msg_prev = plantilla_preventa.replace("{nombre}", nombre).replace("{ruta}", ruta_notif_sel)
-                            msg_listo = plantilla_pedido_listo.replace("{nombre}", nombre).replace("{ruta}", ruta_notif_sel)
-                            col_c1, col_c2, col_c3 = st.columns([2, 1, 1])
-                            col_c1.write(f"👤 {nombre} ({telefono})")
-                            col_c2.markdown(f'<a href="{enviar_whatsapp_link(telefono, msg_prev)}" target="_blank">📅 Recordatorio</a>', unsafe_allow_html=True)
-                            col_c3.markdown(f'<a href="{enviar_whatsapp_link(telefono, msg_listo)}" target="_blank">📦 Pedido listo</a>', unsafe_allow_html=True)
-                        else:
-                            st.warning(f"⚠️ {nombre} — sin teléfono válido.")
-            except Exception as e:
-                st.error(f"Error en preventa: {e}")
-
-# ==========================================
-# TAB 5: PANEL ADMINISTRADOR — solo admin
-# ==========================================
-if tab5:
- with tab5:
-    st.subheader("📊 Panel Administrador")
-    streamlit_autorefresh.st_autorefresh(interval=15000, key="datarefresh")
-
-    with get_db() as db:
-        if db:
-            try:
-                df_base = pd.read_sql("SELECT * FROM pedidos", db)
-                if not df_base.empty:
-                    r_disp = sorted([r for r in df_base['ruta'].unique() if r and r != 'None'])
-                    sel_admin = st.selectbox("Filtrar por Ruta:", ["🌍 Todo"] + r_disp)
-                    df_admin = df_base.copy() if sel_admin == "🌍 Todo" else df_base[df_base['ruta'] == sel_admin.strip()].copy()
-
-                    st.markdown("### ✏️ Editar Cliente")
-                    lista_clientes_edit = df_base.sort_values(by="nombre_cliente")
-                    opciones_clientes = {row['id']: f"{row['nombre_cliente']} ({row['ruta']})" for _, row in lista_clientes_edit.iterrows()}
-                    id_seleccionado = st.selectbox("Cliente a editar:", options=list(opciones_clientes.keys()), format_func=lambda x: opciones_clientes[x])
-
-                    col_btn1, col_btn2 = st.columns(2)
-                    with col_btn1:
-                        if st.button("🔍 Cargar para Edición"):
-                            st.session_state.id_cliente_editar = id_seleccionado
-                    with col_btn2:
-                        if st.button("🗑️ Eliminar Cliente", type="secondary"):
-                            datos_elim = df_base[df_base['id'] == id_seleccionado].iloc[0]
-                            dialogo_eliminar_cliente(id_seleccionado, datos_elim['nombre_cliente'])
-
-                    if st.session_state.id_cliente_editar:
-                        datos_c = df_base[df_base['id'] == st.session_state.id_cliente_editar].iloc[0]
-                        with st.form("formulario_edicion_cliente"):
-                            nuevo_nombre     = st.text_input("Nombre:", value=datos_c['nombre_cliente'])
-                            nuevo_telefono   = st.text_input("Teléfono:", value=datos_c['telefono'])
-                            nueva_ruta       = st.text_input("Ruta:", value=datos_c['ruta'])
-                            nueva_referencia = st.text_input("Referencias:", value=datos_c['referencia'])
-                            nueva_cant_20    = st.number_input("Garrafones 20L:", min_value=0, value=int(datos_c['cantidad_20L']))
-                            nueva_cant_10    = st.number_input("Garrafones 10L:", min_value=0, value=int(datos_c['cantidad_10L']))
-                            if st.form_submit_button("💾 Guardar Cambios"):
-                                cursor_up = db.cursor()
-                                cursor_up.execute(
-                                    "UPDATE pedidos SET nombre_cliente=%s, telefono=%s, ruta=%s, referencia=%s, cantidad_20L=%s, cantidad_10L=%s WHERE id=%s",
-                                    (nuevo_nombre, nuevo_telefono, nueva_ruta, nueva_referencia, nueva_cant_20, nueva_cant_10, st.session_state.id_cliente_editar)
-                                )
-                                db.commit()
-                                cursor_up.close()
-                                st.success("✅ Datos actualizados.")
-                                st.session_state.id_cliente_editar = None
-                                st.rerun()
-
-                    st.divider()
-                    st.markdown("### 🔁 Reinicio de Rutas")
-                    st.warning("⚠️ Úsala sólo al iniciar un nuevo día de reparto.")
-
-                    st.markdown("**Opción A — Reiniciar TODAS las rutas**")
-                    if st.button("🚨 REINICIAR TODAS LAS RUTAS", use_container_width=True):
-                        dialogo_reiniciar_todo()
-
-                    st.markdown("---")
-                    st.markdown("**Opción B — Reiniciar una sola ruta**")
-                    ruta_a_reiniciar = st.selectbox("Selecciona la ruta:", ["-- Seleccionar --"] + r_disp, key="ruta_reinicio_individual")
-                    if ruta_a_reiniciar != "-- Seleccionar --":
-                        if st.button(f"🔄 Reiniciar: {ruta_a_reiniciar}", use_container_width=True):
-                            dialogo_reiniciar_ruta(ruta_a_reiniciar)
-
-                    st.divider()
-                    st.markdown("### 📋 Tabla de Pedidos")
-                    st.dataframe(df_admin, use_container_width=True)
-
-                    excel_data = exportar_excel(df_admin)
-                    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-                    st.download_button(
-                        label="📥 Exportar a Excel",
-                        data=excel_data,
-                        file_name=f"pedidos_viteg_{fecha_hoy}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-            except Exception as e:
-                st.error(f"Error en panel administrador: {e}")
-
-# ==========================================
-# TAB 6: REPORTES — solo admin
-# ==========================================
-if tab6:
- with tab6:
-    st.subheader("📈 Reportes y Análisis de Demanda")
-
-    with get_db() as db:
-        if db:
-            try:
-                df_rep = pd.read_sql("SELECT * FROM pedidos", db)
-                if not df_rep.empty:
-                    total_20 = df_rep['cantidad_20L'].sum()
-                    total_10 = df_rep['cantidad_10L'].sum()
-                    total_clientes = len(df_rep)
-                    entregados = len(df_rep[df_rep['estatus'] == 'entregado'])
-
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("👥 Total Clientes", total_clientes)
-                    c2.metric("💧 Garrafones 20L", int(total_20))
-                    c3.metric("💧 Garrafones 10L", int(total_10))
-                    c4.metric("✅ Tasa de entrega", f"{int((entregados/total_clientes)*100)}%" if total_clientes > 0 else "0%")
-
-                    st.divider()
-                    st.markdown("### 📦 Pedidos por Ruta")
-                    df_por_ruta = df_rep.groupby('ruta').agg(
-                        Clientes=('id', 'count'),
-                        Garrafones_20L=('cantidad_20L', 'sum'),
-                        Garrafones_10L=('cantidad_10L', 'sum'),
-                        Entregados=('estatus', lambda x: (x == 'entregado').sum()),
-                        Pendientes=('estatus', lambda x: (x == 'pendiente').sum()),
-                        No_encontrados=('estatus', lambda x: (x == 'no encontrado').sum()),
-                    ).reset_index()
-                    st.dataframe(df_por_ruta, use_container_width=True)
-
-                    col_g1, col_g2 = st.columns(2)
-                    with col_g1:
-                        st.markdown("**Clientes por ruta**")
-                        st.bar_chart(df_por_ruta.set_index('ruta')['Clientes'])
-                    with col_g2:
-                        st.markdown("**Garrafones 20L por ruta**")
-                        st.bar_chart(df_por_ruta.set_index('ruta')['Garrafones_20L'])
-
-                    st.divider()
-                    st.markdown("### 🔄 Estatus General")
-                    df_estatus = df_rep['estatus'].value_counts().reset_index()
-                    df_estatus.columns = ['Estatus', 'Cantidad']
-                    st.bar_chart(df_estatus.set_index('Estatus')['Cantidad'])
-
-                    st.divider()
-                    st.markdown("### 🏆 Top 10 Clientes por Volumen")
-                    df_rep['total_garrafones'] = df_rep['cantidad_20L'] + df_rep['cantidad_10L']
-                    df_top = df_rep.nlargest(10, 'total_garrafones')[['nombre_cliente', 'ruta', 'cantidad_20L', 'cantidad_10L', 'total_garrafones', 'estatus']]
-                    st.dataframe(df_top, use_container_width=True)
-
-                    st.divider()
-                    st.markdown("### ⚠️ Clientes con Datos Incompletos")
-                    df_incompletos = df_rep[
-                        (df_rep['telefono'].isna()) | (df_rep['telefono'] == '') |
-                        (df_rep['latitud'] == 0) | (df_rep['longitud'] == 0)
-                    ][['nombre_cliente', 'ruta', 'telefono', 'latitud', 'longitud']]
-                    if not df_incompletos.empty:
-                        st.warning(f"{len(df_incompletos)} clientes con datos incompletos")
-                        st.dataframe(df_incompletos, use_container_width=True)
+                                with col_e2:
+                                    if row['estatus'] != 'no encontrado':
+                                        if st.button("❌ No Encontrado", key=f"noe_a_{row['id']}"):
+                                            cursor = db.cursor()
+                                            cursor.execute("UPDATE pedidos SET estatus = 'no encontrado' WHERE id = %s", (row['id'],))
+                                            db.commit()
+                                            cursor.close()
+                                            st.rerun()
                     else:
-                        st.success("✅ Todos los clientes tienen datos completos.")
+                        st.success("🚚 No hay pedidos pendientes.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
-                    excel_reporte = exportar_excel(df_por_ruta)
-                    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-                    st.download_button(
-                        label="📥 Exportar Reporte por Ruta a Excel",
-                        data=excel_reporte,
-                        file_name=f"reporte_viteg_{fecha_hoy}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
+    # --- REGISTRO ---
+    with tab3:
+        st.subheader("📝 Registro de Pedidos")
+        opciones_rutas = ["-- Escribir nueva ruta --"]
+        with get_db() as db_rutas:
+            if db_rutas:
+                cursor_r = db_rutas.cursor()
+                cursor_r.execute("SELECT DISTINCT ruta FROM pedidos WHERE ruta IS NOT NULL AND ruta != ''")
+                for row_r in cursor_r.fetchall():
+                    if row_r[0] not in opciones_rutas:
+                        opciones_rutas.append(row_r[0])
+                cursor_r.close()
+        st.markdown("### 🔍 Buscador de Clientes")
+        busqueda = st.text_input("Buscar por nombre o teléfono:", key="busqueda_admin")
+        if busqueda:
+            with get_db() as db_bus:
+                if db_bus:
+                    df_bus = pd.read_sql("SELECT id, nombre_cliente, telefono, ruta, referencia, estatus FROM pedidos WHERE nombre_cliente LIKE %s OR telefono LIKE %s", db_bus, params=(f"%{busqueda}%", f"%{busqueda}%"))
+                    if not df_bus.empty:
+                        st.dataframe(df_bus, use_container_width=True)
+                    else:
+                        st.info("No se encontraron resultados.")
+        st.divider()
+        st.markdown("### ➕ Nuevo Cliente / Pedido")
+        location = streamlit_geolocation()
+        lat_val, lon_val = 0.0, 0.0
+        if location and isinstance(location, dict) and location.get("latitude") is not None:
+            lat_val = float(location["latitude"])
+            lon_val = float(location["longitude"])
+        with st.form("alta_admin", clear_on_submit=True):
+            col_form1, col_form2 = st.columns(2)
+            with col_form1:
+                nom = st.text_input("Nombre completo del Cliente:*")
+                tel = st.text_input("Teléfono Celular:")
+                sel_ruta = st.selectbox("Ruta:", opciones_rutas)
+                rut = st.text_input("Nueva ruta:") if sel_ruta == "-- Escribir nueva ruta --" else sel_ruta
+                cant_20 = st.number_input("Garrafones 20L:", min_value=0, value=0)
+                cant_10 = st.number_input("Garrafones 10L:", min_value=0, value=0)
+            with col_form2:
+                lat_f = st.number_input("Latitud:", value=lat_val, format="%.6f")
+                lon_f = st.number_input("Longitud:", value=lon_val, format="%.6f")
+                ref = st.text_input("Referencias del domicilio:")
+            if st.form_submit_button("💾 Guardar y Registrar", use_container_width=True):
+                if nom and rut and rut.strip():
+                    with get_db() as db_alta:
+                        if db_alta:
+                            try:
+                                cursor_a = db_alta.cursor()
+                                cursor_a.execute("INSERT INTO pedidos (nombre_cliente, telefono, ruta, cantidad_20L, cantidad_10L, referencia, estatus, latitud, longitud, direccion) VALUES (%s, %s, %s, %s, %s, %s, 'pendiente', %s, %s, '')", (nom, tel, rut, cant_20, cant_10, ref, lat_f, lon_f))
+                                db_alta.commit()
+                                cursor_a.close()
+                                st.success(f"🎉 Cliente '{nom}' registrado en ruta: {rut}")
+                                if tel and len(str(tel).strip()) >= 10:
+                                    msg_conf = f"Hola {nom}, su pedido de Agua VITEG 💧 fue registrado. ¡Gracias!"
+                                    st.markdown(f'<a href="{enviar_whatsapp_link(tel, msg_conf)}" target="_blank"><button style="background-color:#25D366;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;">📲 Enviar confirmación</button></a>', unsafe_allow_html=True)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al registrar: {e}")
                 else:
-                    st.info("No hay datos suficientes para generar reportes.")
-            except Exception as e:
-                st.error(f"Error en reportes: {e}")
+                    st.error("Completa los campos obligatorios: Nombre y Ruta.")
+
+    # --- PREVENTA ---
+    with tab4:
+        st.subheader("📲 Notificaciones y Preventa")
+        plantilla_preventa = st.text_area("Plantilla de recordatorio (usa {nombre} y {ruta}):", value="Hola {nombre}, le escribimos de Agua VITEG 💧. Le recordamos que mañana el camión pasará por su zona ({ruta}). ¡Nos vemos pronto!", height=80)
+        plantilla_pedido_listo = st.text_area("Plantilla de pedido listo:", value="Hola {nombre}, su pedido de Agua VITEG 💧 está listo y en camino. ¡Gracias!", height=80)
+        st.divider()
+        with get_db() as db:
+            if db:
+                try:
+                    df_notif = pd.read_sql("SELECT nombre_cliente, telefono, ruta FROM pedidos", db)
+                    if not df_notif.empty:
+                        rutas_notif = sorted([r.strip() for r in df_notif['ruta'].unique() if r])
+                        ruta_notif_sel = st.selectbox("Seleccionar Ruta:", rutas_notif, key="ruta_prev_admin")
+                        df_clientes_ruta = df_notif[df_notif['ruta'] == ruta_notif_sel]
+                        st.markdown(f"**{len(df_clientes_ruta)} clientes en esta ruta**")
+                        st.divider()
+                        for _, row_c in df_clientes_ruta.iterrows():
+                            nombre = row_c['nombre_cliente']
+                            telefono = str(row_c['telefono']).strip() if row_c['telefono'] else ""
+                            if telefono and len(telefono) >= 10:
+                                msg_prev = plantilla_preventa.replace("{nombre}", nombre).replace("{ruta}", ruta_notif_sel)
+                                msg_listo = plantilla_pedido_listo.replace("{nombre}", nombre).replace("{ruta}", ruta_notif_sel)
+                                col_c1, col_c2, col_c3 = st.columns([2, 1, 1])
+                                col_c1.write(f"👤 {nombre} ({telefono})")
+                                col_c2.markdown(f'<a href="{enviar_whatsapp_link(telefono, msg_prev)}" target="_blank">📅 Recordatorio</a>', unsafe_allow_html=True)
+                                col_c3.markdown(f'<a href="{enviar_whatsapp_link(telefono, msg_listo)}" target="_blank">📦 Listo</a>', unsafe_allow_html=True)
+                            else:
+                                st.warning(f"⚠️ {nombre} — sin teléfono válido.")
+                except Exception as e:
+                    st.error(f"Error en preventa: {e}")
+
+    # --- ADMINISTRADOR ---
+    with tab5:
+        st.subheader("📊 Panel Administrador")
+        streamlit_autorefresh.st_autorefresh(interval=15000, key="datarefresh")
+        with get_db() as db:
+            if db:
+                try:
+                    df_base = pd.read_sql("SELECT * FROM pedidos", db)
+                    if not df_base.empty:
+                        r_disp = sorted([r for r in df_base['ruta'].unique() if r and r != 'None'])
+                        sel_admin = st.selectbox("Filtrar por Ruta:", ["🌍 Todo"] + r_disp)
+                        df_admin = df_base.copy() if sel_admin == "🌍 Todo" else df_base[df_base['ruta'] == sel_admin.strip()].copy()
+                        st.markdown("### ✏️ Editar Cliente")
+                        lista_clientes_edit = df_base.sort_values(by="nombre_cliente")
+                        opciones_clientes = {row['id']: f"{row['nombre_cliente']} ({row['ruta']})" for _, row in lista_clientes_edit.iterrows()}
+                        id_seleccionado = st.selectbox("Cliente a editar:", options=list(opciones_clientes.keys()), format_func=lambda x: opciones_clientes[x])
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("🔍 Cargar para Edición"):
+                                st.session_state.id_cliente_editar = id_seleccionado
+                        with col_btn2:
+                            if st.button("🗑️ Eliminar Cliente", type="secondary"):
+                                datos_elim = df_base[df_base['id'] == id_seleccionado].iloc[0]
+                                dialogo_eliminar_cliente(id_seleccionado, datos_elim['nombre_cliente'])
+                        if st.session_state.id_cliente_editar:
+                            datos_c = df_base[df_base['id'] == st.session_state.id_cliente_editar].iloc[0]
+                            with st.form("formulario_edicion_cliente"):
+                                nuevo_nombre = st.text_input("Nombre:", value=datos_c['nombre_cliente'])
+                                nuevo_telefono = st.text_input("Teléfono:", value=datos_c['telefono'])
+                                nueva_ruta = st.text_input("Ruta:", value=datos_c['ruta'])
+                                nueva_referencia = st.text_input("Referencias:", value=datos_c['referencia'])
+                                nueva_cant_20 = st.number_input("Garrafones 20L:", min_value=0, value=int(datos_c['cantidad_20L']))
+                                nueva_cant_10 = st.number_input("Garrafones 10L:", min_value=0, value=int(datos_c['cantidad_10L']))
+                                if st.form_submit_button("💾 Guardar Cambios"):
+                                    cursor_up = db.cursor()
+                                    cursor_up.execute("UPDATE pedidos SET nombre_cliente=%s, telefono=%s, ruta=%s, referencia=%s, cantidad_20L=%s, cantidad_10L=%s WHERE id=%s", (nuevo_nombre, nuevo_telefono, nueva_ruta, nueva_referencia, nueva_cant_20, nueva_cant_10, st.session_state.id_cliente_editar))
+                                    db.commit()
+                                    cursor_up.close()
+                                    st.success("✅ Datos actualizados.")
+                                    st.session_state.id_cliente_editar = None
+                                    st.rerun()
+                        st.divider()
+                        st.markdown("### 🔁 Reinicio de Rutas")
+                        st.warning("⚠️ Úsala sólo al iniciar un nuevo día de reparto.")
+                        if st.button("🚨 REINICIAR TODAS LAS RUTAS", use_container_width=True):
+                            dialogo_reiniciar_todo()
+                        st.markdown("---")
+                        ruta_a_reiniciar = st.selectbox("Reiniciar una sola ruta:", ["-- Seleccionar --"] + r_disp, key="ruta_reinicio_individual")
+                        if ruta_a_reiniciar != "-- Seleccionar --":
+                            if st.button(f"🔄 Reiniciar: {ruta_a_reiniciar}", use_container_width=True):
+                                dialogo_reiniciar_ruta(ruta_a_reiniciar)
+                        st.divider()
+                        st.markdown("### 📋 Tabla de Pedidos")
+                        st.dataframe(df_admin, use_container_width=True)
+                        excel_data = exportar_excel(df_admin)
+                        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+                        st.download_button(label="📥 Exportar a Excel", data=excel_data, file_name=f"pedidos_viteg_{fecha_hoy}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error en panel administrador: {e}")
+
+    # --- REPORTES ---
+    with tab6:
+        st.subheader("📈 Reportes y Análisis")
+        with get_db() as db:
+            if db:
+                try:
+                    df_rep = pd.read_sql("SELECT * FROM pedidos", db)
+                    if not df_rep.empty:
+                        total_20 = df_rep['cantidad_20L'].sum()
+                        total_10 = df_rep['cantidad_10L'].sum()
+                        total_clientes = len(df_rep)
+                        entregados = len(df_rep[df_rep['estatus'] == 'entregado'])
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("👥 Total Clientes", total_clientes)
+                        c2.metric("💧 Garrafones 20L", int(total_20))
+                        c3.metric("💧 Garrafones 10L", int(total_10))
+                        c4.metric("✅ Tasa de entrega", f"{int((entregados/total_clientes)*100)}%" if total_clientes > 0 else "0%")
+                        st.divider()
+                        df_por_ruta = df_rep.groupby('ruta').agg(Clientes=('id', 'count'), Garrafones_20L=('cantidad_20L', 'sum'), Garrafones_10L=('cantidad_10L', 'sum'), Entregados=('estatus', lambda x: (x == 'entregado').sum()), Pendientes=('estatus', lambda x: (x == 'pendiente').sum()), No_encontrados=('estatus', lambda x: (x == 'no encontrado').sum())).reset_index()
+                        st.dataframe(df_por_ruta, use_container_width=True)
+                        col_g1, col_g2 = st.columns(2)
+                        with col_g1:
+                            st.bar_chart(df_por_ruta.set_index('ruta')['Clientes'])
+                        with col_g2:
+                            st.bar_chart(df_por_ruta.set_index('ruta')['Garrafones_20L'])
+                        st.divider()
+                        df_rep['total_garrafones'] = df_rep['cantidad_20L'] + df_rep['cantidad_10L']
+                        df_top = df_rep.nlargest(10, 'total_garrafones')[['nombre_cliente', 'ruta', 'cantidad_20L', 'cantidad_10L', 'total_garrafones', 'estatus']]
+                        st.dataframe(df_top, use_container_width=True)
+                        excel_reporte = exportar_excel(df_por_ruta)
+                        st.download_button(label="📥 Exportar Reporte a Excel", data=excel_reporte, file_name=f"reporte_viteg_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                    else:
+                        st.info("No hay datos suficientes.")
+                except Exception as e:
+                    st.error(f"Error en reportes: {e}")
+
+# ==========================================
+# VISTA REPARTIDOR
+# ==========================================
+else:
+    tab_rep1, tab_rep2, tab_rep3 = st.tabs([
+        "🚚 Mi Ruta de Entrega",
+        "📝 Registrar Cliente",
+        "📲 Notificaciones de Preventa"
+    ])
+
+    # --- RUTA REPARTIDOR ---
+    with tab_rep1:
+        st.subheader("🚚 Mi Ruta de Entrega")
+        with get_db() as db:
+            if db:
+                try:
+                    df_chofer = pd.read_sql("SELECT id, nombre_cliente, telefono, ruta, cantidad_20L, cantidad_10L, referencia, estatus, latitud, longitud FROM pedidos WHERE estatus != 'entregado'", db)
+                    if not df_chofer.empty:
+                        rutas_chofer = sorted(list(df_chofer['ruta'].unique()))
+                        ruta_sel = st.selectbox("Selecciona tu Ruta / Zona:", rutas_chofer, key="chofer_ruta_sel_rep")
+                        if st.session_state.ruta_sel_previa != ruta_sel:
+                            st.session_state.ruta_optimizada = False
+                            st.session_state.df_ruta_ordenada = None
+                            st.session_state.orden_manual = None
+                            st.session_state.modo_reordenar = False
+                            st.session_state.ruta_sel_previa = ruta_sel
+                        df_ruta_base = df_chofer[df_chofer['ruta'] == ruta_sel].copy()
+                        total_ruta = len(df_ruta_base)
+                        with get_db() as db2:
+                            if db2:
+                                df_todos = pd.read_sql("SELECT estatus FROM pedidos WHERE ruta = %s", db2, params=(ruta_sel,))
+                                entregados_hoy = len(df_todos[df_todos['estatus'] == 'entregado'])
+                                total_ruta_completa = len(df_todos)
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("📦 Pendientes", total_ruta)
+                        c2.metric("✅ Entregados", entregados_hoy)
+                        progreso = int((entregados_hoy / total_ruta_completa) * 100) if total_ruta_completa > 0 else 0
+                        c3.metric("📊 Progreso", f"{progreso}%")
+                        st.progress(progreso / 100)
+                        st.divider()
+                        coords_validas = df_ruta_base[(df_ruta_base['latitud'] != 0) & (df_ruta_base['longitud'] != 0)].copy()
+                        sin_coords = df_ruta_base[(df_ruta_base['latitud'] == 0) | (df_ruta_base['longitud'] == 0)].copy()
+                        col_opt1, col_opt2, col_opt3 = st.columns(3)
+                        with col_opt1:
+                            btn_optimizar = st.button("🧭 OPTIMIZAR CON IA", use_container_width=True, type="primary", key="opt_rep")
+                        with col_opt2:
+                            btn_reordenar = st.button("✋ AJUSTAR MANUALMENTE", use_container_width=True, key="rea_rep")
+                        with col_opt3:
+                            btn_original = st.button("↩️ Orden original", use_container_width=True, key="ori_rep")
+                        if btn_optimizar:
+                            if len(coords_validas) >= 2:
+                                df_optimizado = pd.concat([optimizar_ruta(coords_validas), sin_coords]).reset_index(drop=True)
+                                st.session_state.df_ruta_ordenada = df_optimizado
+                                st.session_state.orden_manual = None
+                                st.session_state.ruta_optimizada = True
+                                st.session_state.modo_reordenar = False
+                            else:
+                                st.warning("⚠️ Se necesitan al menos 2 clientes con GPS.")
+                        if btn_reordenar:
+                            st.session_state.modo_reordenar = True
+                        if btn_original:
+                            st.session_state.ruta_optimizada = False
+                            st.session_state.df_ruta_ordenada = None
+                            st.session_state.orden_manual = None
+                            st.session_state.modo_reordenar = False
+                        if st.session_state.ruta_optimizada and st.session_state.df_ruta_ordenada is not None:
+                            df_ruta_actual = st.session_state.df_ruta_ordenada.copy()
+                            st.success("✅ Ruta optimizada por IA.")
+                        elif st.session_state.orden_manual is not None:
+                            df_ruta_actual = st.session_state.orden_manual.copy()
+                            st.success("✅ Orden ajustado manualmente.")
+                        else:
+                            df_ruta_actual = df_ruta_base.copy()
+                        if st.session_state.modo_reordenar:
+                            st.markdown("### ✋ Ajusta el orden manualmente")
+                            if "lista_ids_manual" not in st.session_state or st.session_state.lista_ids_ruta != ruta_sel:
+                                st.session_state.lista_ids_manual = list(df_ruta_actual['id'])
+                                st.session_state.lista_ids_ruta = ruta_sel
+                            ids_orden = st.session_state.lista_ids_manual
+                            df_orden = df_ruta_actual.set_index('id').loc[ids_orden].reset_index()
+                            for i, (_, row) in enumerate(df_orden.iterrows()):
+                                col_n, col_u, col_d = st.columns([6, 1, 1])
+                                col_n.write(f"**#{i+1}** — {row['nombre_cliente']}")
+                                if i > 0:
+                                    if col_u.button("⬆️", key=f"up_r_{row['id']}_{i}"):
+                                        ids_orden[i], ids_orden[i-1] = ids_orden[i-1], ids_orden[i]
+                                        st.session_state.lista_ids_manual = ids_orden
+                                        st.rerun()
+                                if i < len(df_orden) - 1:
+                                    if col_d.button("⬇️", key=f"dn_r_{row['id']}_{i}"):
+                                        ids_orden[i], ids_orden[i+1] = ids_orden[i+1], ids_orden[i]
+                                        st.session_state.lista_ids_manual = ids_orden
+                                        st.rerun()
+                            if st.button("✅ Confirmar orden", type="primary", use_container_width=True, key="conf_rep"):
+                                df_manual = df_ruta_actual.set_index('id').loc[st.session_state.lista_ids_manual].reset_index()
+                                st.session_state.orden_manual = df_manual
+                                st.session_state.ruta_optimizada = False
+                                st.session_state.modo_reordenar = False
+                                st.rerun()
+                            st.divider()
+                        df_maps = df_ruta_actual[(df_ruta_actual['latitud'] != 0) & (df_ruta_actual['longitud'] != 0)]
+                        if len(df_maps) > 1:
+                            origen = f"{df_maps.iloc[0]['latitud']},{df_maps.iloc[0]['longitud']}"
+                            destino = f"{df_maps.iloc[-1]['latitud']},{df_maps.iloc[-1]['longitud']}"
+                            url_ruta_completa = f"https://www.google.com/maps/dir/{origen}/{destino}"
+                            label = "🗺️ VER RUTA OPTIMIZADA" if st.session_state.ruta_optimizada else "🗺️ VER RUTA COMPLETA"
+                            st.markdown(f'<a href="{url_ruta_completa}" target="_blank"><button style="background-color:#34A853;color:white;border:none;padding:12px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;font-size:15px;margin-bottom:10px;">{label}</button></a>', unsafe_allow_html=True)
+                        st.divider()
+                        titulo_lista = "🧭 Orden optimizado" if st.session_state.ruta_optimizada else "📋 Pedidos activos"
+                        st.markdown(f"### {titulo_lista}: {ruta_sel} ({total_ruta} restantes)")
+                        for idx, (_, row) in enumerate(df_ruta_actual.iterrows(), start=1):
+                            num_tel = str(row['telefono']).strip() if row['telefono'] else "S/N"
+                            prefix_icon = "⏳" if row['estatus'] == 'pendiente' else "❌"
+                            num_parada = f"#{idx} — " if st.session_state.ruta_optimizada else ""
+                            with st.expander(f"{prefix_icon} {num_parada}{row['nombre_cliente']} | {num_tel}"):
+                                st.write(f"🛒 {row['cantidad_20L']} Garrafones 20L | {row['cantidad_10L']} Garrafones 10L")
+                                st.write(f"🏠 Referencias: {row['referencia']}")
+                                if row['latitud'] != 0 and row['longitud'] != 0:
+                                    url_gmaps = f"https://www.google.com/maps/search/?api=1&query={row['latitud']},{row['longitud']}"
+                                    st.markdown(f'<a href="{url_gmaps}" target="_blank"><button style="background-color:#1a73e8;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">🗺️ NAVEGAR</button></a>', unsafe_allow_html=True)
+                                if num_tel != "S/N" and len(num_tel) >= 10:
+                                    c1, c2, c3 = st.columns(3)
+                                    with c1:
+                                        st.markdown(f'<a href="tel:{num_tel}"><button style="background-color:#007BFF;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">📞 LLAMAR</button></a>', unsafe_allow_html=True)
+                                    with c2:
+                                        msg_afuera = "Hola, le avisamos de Agua VITEG 💧. El camión ya está afuera. ¡Gracias!"
+                                        st.markdown(f'<a href="{enviar_whatsapp_link(num_tel, msg_afuera)}" target="_blank"><button style="background-color:#25D366;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">📲 YA ESTOY AFUERA</button></a>', unsafe_allow_html=True)
+                                    with c3:
+                                        msg_ent = f"Hola {row['nombre_cliente']}, su pedido fue entregado. ¡Gracias!"
+                                        st.markdown(f'<a href="{enviar_whatsapp_link(num_tel, msg_ent)}" target="_blank"><button style="background-color:#128C7E;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">✅ CONFIRMAR</button></a>', unsafe_allow_html=True)
+                                st.markdown("---")
+                                col_e1, col_e2 = st.columns(2)
+                                with col_e1:
+                                    if st.button("✅ Marcar Entregado", key=f"ent_r_{row['id']}"):
+                                        cursor = db.cursor()
+                                        cursor.execute("UPDATE pedidos SET estatus = 'entregado' WHERE id = %s", (row['id'],))
+                                        db.commit()
+                                        cursor.close()
+                                        st.session_state.ruta_optimizada = False
+                                        st.session_state.df_ruta_ordenada = None
+                                        st.rerun()
+                                with col_e2:
+                                    if row['estatus'] != 'no encontrado':
+                                        if st.button("❌ No Encontrado", key=f"noe_r_{row['id']}"):
+                                            cursor = db.cursor()
+                                            cursor.execute("UPDATE pedidos SET estatus = 'no encontrado' WHERE id = %s", (row['id'],))
+                                            db.commit()
+                                            cursor.close()
+                                            st.rerun()
+                    else:
+                        st.success("🚚 ¡No hay pedidos pendientes!")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # --- REGISTRO REPARTIDOR ---
+    with tab_rep2:
+        st.subheader("📝 Registrar Cliente")
+        opciones_rutas_r = ["-- Escribir nueva ruta --"]
+        with get_db() as db_rutas:
+            if db_rutas:
+                cursor_r = db_rutas.cursor()
+                cursor_r.execute("SELECT DISTINCT ruta FROM pedidos WHERE ruta IS NOT NULL AND ruta != ''")
+                for row_r in cursor_r.fetchall():
+                    if row_r[0] not in opciones_rutas_r:
+                        opciones_rutas_r.append(row_r[0])
+                cursor_r.close()
+        st.markdown("### 🔍 Buscador de Clientes")
+        busqueda_r = st.text_input("Buscar por nombre o teléfono:", key="busqueda_rep")
+        if busqueda_r:
+            with get_db() as db_bus:
+                if db_bus:
+                    df_bus = pd.read_sql("SELECT id, nombre_cliente, telefono, ruta, referencia, estatus FROM pedidos WHERE nombre_cliente LIKE %s OR telefono LIKE %s", db_bus, params=(f"%{busqueda_r}%", f"%{busqueda_r}%"))
+                    if not df_bus.empty:
+                        st.dataframe(df_bus, use_container_width=True)
+                    else:
+                        st.info("No se encontraron resultados.")
+        st.divider()
+        location = streamlit_geolocation()
+        lat_val_r, lon_val_r = 0.0, 0.0
+        if location and isinstance(location, dict) and location.get("latitude") is not None:
+            lat_val_r = float(location["latitude"])
+            lon_val_r = float(location["longitude"])
+        with st.form("alta_rep", clear_on_submit=True):
+            col_form1, col_form2 = st.columns(2)
+            with col_form1:
+                nom_r = st.text_input("Nombre completo:*")
+                tel_r = st.text_input("Teléfono:")
+                sel_ruta_r = st.selectbox("Ruta:", opciones_rutas_r)
+                rut_r = st.text_input("Nueva ruta:") if sel_ruta_r == "-- Escribir nueva ruta --" else sel_ruta_r
+                cant_20_r = st.number_input("Garrafones 20L:", min_value=0, value=0)
+                cant_10_r = st.number_input("Garrafones 10L:", min_value=0, value=0)
+            with col_form2:
+                lat_f_r = st.number_input("Latitud:", value=lat_val_r, format="%.6f")
+                lon_f_r = st.number_input("Longitud:", value=lon_val_r, format="%.6f")
+                ref_r = st.text_input("Referencias:")
+            if st.form_submit_button("💾 Guardar", use_container_width=True):
+                if nom_r and rut_r and rut_r.strip():
+                    with get_db() as db_alta:
+                        if db_alta:
+                            try:
+                                cursor_a = db_alta.cursor()
+                                cursor_a.execute("INSERT INTO pedidos (nombre_cliente, telefono, ruta, cantidad_20L, cantidad_10L, referencia, estatus, latitud, longitud, direccion) VALUES (%s, %s, %s, %s, %s, %s, 'pendiente', %s, %s, '')", (nom_r, tel_r, rut_r, cant_20_r, cant_10_r, ref_r, lat_f_r, lon_f_r))
+                                db_alta.commit()
+                                cursor_a.close()
+                                st.success(f"🎉 '{nom_r}' registrado en ruta: {rut_r}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+                else:
+                    st.error("Completa Nombre y Ruta.")
+
+    # --- PREVENTA REPARTIDOR ---
+    with tab_rep3:
+        st.subheader("📲 Notificaciones de Preventa")
+        plantilla_prev_r = st.text_area("Plantilla recordatorio:", value="Hola {nombre}, le escribimos de Agua VITEG 💧. Mañana el camión pasará por su zona ({ruta}). ¡Nos vemos!", height=80)
+        st.divider()
+        with get_db() as db:
+            if db:
+                try:
+                    df_notif_r = pd.read_sql("SELECT nombre_cliente, telefono, ruta FROM pedidos", db)
+                    if not df_notif_r.empty:
+                        rutas_notif_r = sorted([r.strip() for r in df_notif_r['ruta'].unique() if r])
+                        ruta_notif_r = st.selectbox("Seleccionar Ruta:", rutas_notif_r, key="ruta_prev_rep")
+                        df_clientes_r = df_notif_r[df_notif_r['ruta'] == ruta_notif_r]
+                        st.markdown(f"**{len(df_clientes_r)} clientes**")
+                        st.divider()
+                        for _, row_c in df_clientes_r.iterrows():
+                            nombre = row_c['nombre_cliente']
+                            telefono = str(row_c['telefono']).strip() if row_c['telefono'] else ""
+                            if telefono and len(telefono) >= 10:
+                                msg = plantilla_prev_r.replace("{nombre}", nombre).replace("{ruta}", ruta_notif_r)
+                                col_c1, col_c2 = st.columns([3, 1])
+                                col_c1.write(f"👤 {nombre} ({telefono})")
+                                col_c2.markdown(f'<a href="{enviar_whatsapp_link(telefono, msg)}" target="_blank">📲 Enviar</a>', unsafe_allow_html=True)
+                            else:
+                                st.warning(f"⚠️ {nombre} — sin teléfono.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
