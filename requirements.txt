@@ -1,11 +1,9 @@
-streamlit
-mysql-connector-python
-pandas
-folium
-streamlit-folium
-streamlit-autorefresh
-streamlit-geolocation
-numpy
-scipy
-openpyxl
-streamlit-sortables
+streamlit==1.38.0
+   mysql-connector-python==8.4.0
+   pandas==2.2.2
+   numpy==1.26.4
+   folium==0.16.0
+   streamlit-folium==0.21.0
+   streamlit-autorefresh==1.0.1
+   streamlit-geolocation==0.0.10
+   openpyxl==3.1.2
