@@ -10,7 +10,6 @@ from contextlib import contextmanager
 from datetime import datetime
 import io
 import numpy as np
-from scipy.spatial.distance import cdist
 
 # ==========================================
 # CONFIGURACIÓN DE LA PÁGINA
@@ -161,7 +160,9 @@ def optimizar_ruta(df):
     n = len(coords)
     if n <= 1:
         return df
-    dist_matrix = cdist(coords, coords, metric='euclidean')
+    coords = coords.astype(float)
+    diff = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
+    dist_matrix = np.sqrt((diff ** 2).sum(axis=2))
     visitado = [False] * n
     orden = []
     actual = 0
