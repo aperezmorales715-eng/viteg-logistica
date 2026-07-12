@@ -18,10 +18,73 @@ from scipy.spatial.distance import cdist
 st.set_page_config(page_title="Sistema Interno - Agua VITEG", layout="wide")
 
 # ==========================================
+# ESTILO VISUAL (tema azul tipo app de reparto)
+# ==========================================
+st.markdown("""
+<style>
+    :root {
+        --viteg-azul: #1a73e8;
+        --viteg-azul-claro: #EAF2FE;
+        --viteg-verde: #25D366;
+    }
+
+    /* Botones generales: más redondeados, tipo "pill" */
+    div.stButton > button {
+        border-radius: 24px;
+        font-weight: 600;
+        border: 1px solid #DCEBFC;
+    }
+    div.stButton > button[kind="primary"] {
+        background-color: var(--viteg-azul);
+        border-color: var(--viteg-azul);
+    }
+
+    /* Tarjetas de métricas */
+    [data-testid="stMetric"] {
+        background-color: var(--viteg-azul-claro);
+        border-radius: 14px;
+        padding: 14px 10px;
+        border: 1px solid #DCEBFC;
+    }
+    [data-testid="stMetricLabel"] {
+        font-weight: 600;
+    }
+
+    /* Pedidos como tarjetas (expanders) */
+    [data-testid="stExpander"] {
+        border-radius: 14px;
+        border: 1px solid #E3ECF5;
+        margin-bottom: 10px;
+        overflow: hidden;
+    }
+    [data-testid="stExpander"] summary {
+        font-weight: 600;
+        padding: 10px 6px;
+    }
+
+    /* Inputs y selects redondeados */
+    div[data-baseweb="select"] > div, .stTextInput input, .stNumberInput input, .stTextArea textarea {
+        border-radius: 10px !important;
+    }
+
+    /* Barra de progreso */
+    .stProgress > div > div > div {
+        background-color: var(--viteg-azul);
+    }
+
+    /* Separadores más sutiles */
+    hr {
+        margin: 0.6rem 0;
+        opacity: 0.25;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ==========================================
 # LOGIN
 # ==========================================
-CLAVE_ADMIN = "viteg2024"
-CLAVE_REPARTIDOR = "reparto123"
+CLAVE_ADMIN = st.secrets.get("CLAVE_ADMIN", "viteg2024")
+CLAVE_REPARTIDOR = st.secrets.get("CLAVE_REPARTIDOR", "reparto123")
 
 if "rol" not in st.session_state:
     st.session_state.rol = None
@@ -217,31 +280,33 @@ with col_titulo:
     st.markdown("Panel de control interno para el monitoreo de rutas, despacho de repartidores y análisis de demanda.")
 
 # ==========================================
-# NAVEGACIÓN (selectbox — mejor experiencia en celular que tabs o sidebar)
+# NAVEGACIÓN (botones tipo pill — más visual y táctil en celular)
 # ==========================================
+SECCIONES_ADMIN = ["📍 Mapa", "🚚 Panel Chofer", "📝 Registro", "📲 Preventa", "📊 Administrador", "📈 Reportes"]
+SECCIONES_REP = ["🚚 Mi Ruta", "📝 Registrar", "📲 Preventa"]
+
+if "nav_actual" not in st.session_state:
+    st.session_state.nav_actual = SECCIONES_ADMIN[0] if st.session_state.rol == "admin" else SECCIONES_REP[0]
+
+opciones_nav = SECCIONES_ADMIN if st.session_state.rol == "admin" else SECCIONES_REP
+cols_nav = st.columns(3)
+for i, op in enumerate(opciones_nav):
+    with cols_nav[i % 3]:
+        es_actual = st.session_state.nav_actual == op
+        if st.button(op, key=f"navbtn_{op}", use_container_width=True, type="primary" if es_actual else "secondary"):
+            st.session_state.nav_actual = op
+            st.rerun()
+
 if st.session_state.rol == "admin":
-    seccion = st.selectbox(
-        "📂 Selecciona sección:",
-        [
-            "📍 Mapa",
-            "🚚 Panel Chofer",
-            "📝 Registro",
-            "📲 Preventa",
-            "📊 Administrador",
-            "📈 Reportes",
-        ],
-        key="nav_admin",
-    )
+    seccion = st.session_state.nav_actual
 else:
-    seccion_rep = st.selectbox(
-        "📂 Selecciona sección:",
-        [
-            "🚚 Mi Ruta de Entrega",
-            "📝 Registrar Cliente",
-            "📲 Notificaciones de Preventa",
-        ],
-        key="nav_rep",
-    )
+    # Los nombres cortos del menú se mapean a los nombres completos usados en el resto del código
+    _mapa_rep = {
+        "🚚 Mi Ruta": "🚚 Mi Ruta de Entrega",
+        "📝 Registrar": "📝 Registrar Cliente",
+        "📲 Preventa": "📲 Notificaciones de Preventa",
+    }
+    seccion_rep = _mapa_rep[st.session_state.nav_actual]
 st.divider()
 
 # ==========================================
@@ -659,6 +724,27 @@ if st.session_state.rol == "admin":
                         with col_g2:
                             st.bar_chart(df_por_ruta.set_index('ruta')['Garrafones_20L'])
                         st.divider()
+
+                        # --- VENTAS ENTREGADAS POR REPARTIDOR (usando la Ruta como identificador) ---
+                        st.markdown("### 🚴 Garrafones entregados por Repartidor")
+                        st.caption("Se calcula usando el nombre de la **Ruta** como identificador del repartidor. Si nombras tus rutas con el nombre de cada persona (ej. 'Ruta Juan', 'Ruta María'), esta tabla te da el total exacto por repartidor sin tocar la base de datos.")
+                        df_entregados = df_rep[df_rep['estatus'] == 'entregado']
+                        if not df_entregados.empty:
+                            df_por_repartidor = df_entregados.groupby('ruta').agg(
+                                Pedidos_entregados=('id', 'count'),
+                                Garrafones_20L=('cantidad_20L', 'sum'),
+                                Garrafones_10L=('cantidad_10L', 'sum'),
+                            ).reset_index().rename(columns={'ruta': 'Repartidor / Ruta'})
+                            df_por_repartidor['Total_garrafones'] = df_por_repartidor['Garrafones_20L'] + df_por_repartidor['Garrafones_10L']
+                            df_por_repartidor = df_por_repartidor.sort_values('Total_garrafones', ascending=False)
+                            st.dataframe(df_por_repartidor, use_container_width=True)
+                            st.bar_chart(df_por_repartidor.set_index('Repartidor / Ruta')['Total_garrafones'])
+                            excel_repartidores = exportar_excel(df_por_repartidor)
+                            st.download_button(label="📥 Exportar Ventas por Repartidor", data=excel_repartidores, file_name=f"repartidores_viteg_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="btn_export_repartidores")
+                        else:
+                            st.info("Todavía no hay pedidos entregados.")
+                        st.divider()
+
                         df_rep['total_garrafones'] = df_rep['cantidad_20L'] + df_rep['cantidad_10L']
                         df_top = df_rep.nlargest(10, 'total_garrafones')[['nombre_cliente', 'ruta', 'cantidad_20L', 'cantidad_10L', 'total_garrafones', 'estatus']]
                         st.dataframe(df_top, use_container_width=True)
