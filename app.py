@@ -261,7 +261,7 @@ for k, v in defaults.items():
 # SIDEBAR
 # ==========================================
 with st.sidebar:
-    st.image("logo.jpeg", use_container_width=True)
+    st.image("logo.jpeg", use_column_width=True)
     st.markdown("---")
     rol_label = "👔 Administrador" if st.session_state.rol == "admin" else "🚚 Repartidor"
     st.markdown(f"**{rol_label}**")
