@@ -382,6 +382,7 @@ if st.session_state.rol == "admin":
     # --- MAPA ---
     if seccion == "📍 Mapa":
         st.subheader("🗺️ Monitoreo Geográfico de Pedidos")
+        streamlit_autorefresh.st_autorefresh(interval=20000, key="mapa_refresh")
         with get_db() as db:
             if db:
                 try:
