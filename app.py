@@ -148,6 +148,21 @@ def enviar_whatsapp_link(telefono, mensaje):
         tel = f"52{tel}"
     return f"https://wa.me/{tel}?text={urllib.parse.quote(mensaje)}"
 
+def extraer_foto_y_texto(referencia):
+    """Si el texto de referencia contiene un link (http/https), lo separa del resto.
+    Así el campo 'Referencias' puede seguir usándose como texto normal, pero si
+    alguien pega un link a una foto (Google Fotos, Drive, etc.), la app la detecta
+    y la muestra como imagen — sin necesidad de una columna nueva en la BD."""
+    if not referencia:
+        return "", None
+    import re
+    match = re.search(r'(https?://\S+)', str(referencia))
+    if match:
+        url = match.group(1)
+        texto_limpio = str(referencia).replace(url, "").strip(" -,.:;")
+        return texto_limpio, url
+    return referencia, None
+
 def exportar_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -509,7 +524,14 @@ if st.session_state.rol == "admin":
                             num_parada = f"#{idx} — " if st.session_state.ruta_optimizada else ""
                             with st.expander(f"{prefix_icon} {num_parada}{row['nombre_cliente']} | {num_tel}"):
                                 st.write(f"🛒 {row['cantidad_20L']} Garrafones 20L | {row['cantidad_10L']} Garrafones 10L")
-                                st.write(f"🏠 Referencias: {row['referencia']}")
+                                texto_ref, foto_url = extraer_foto_y_texto(row['referencia'])
+                                st.write(f"🏠 Referencias: {texto_ref if texto_ref else 'Sin notas'}")
+                                if foto_url:
+                                    st.markdown(f'<a href="{foto_url}" target="_blank">📷 Ver foto de referencia</a>', unsafe_allow_html=True)
+                                    try:
+                                        st.image(foto_url, width=250)
+                                    except Exception:
+                                        pass
                                 if row['latitud'] != 0 and row['longitud'] != 0:
                                     url_gmaps = f"https://www.google.com/maps/search/?api=1&query={row['latitud']},{row['longitud']}"
                                     st.markdown(f'<a href="{url_gmaps}" target="_blank"><button style="background-color:#1a73e8;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">🗺️ NAVEGAR</button></a>', unsafe_allow_html=True)
@@ -588,7 +610,7 @@ if st.session_state.rol == "admin":
             with col_form2:
                 lat_f = st.number_input("Latitud:", value=lat_val, format="%.6f")
                 lon_f = st.number_input("Longitud:", value=lon_val, format="%.6f")
-                ref = st.text_input("Referencias del domicilio:")
+                ref = st.text_input("Referencias del domicilio:", help="📷 Tip: puedes pegar aquí un link a una foto de la fachada (súbela a Google Fotos/Drive, comparte el link público, y pégalo junto al texto). La app la mostrará como imagen para el repartidor.")
             if st.form_submit_button("💾 Guardar y Registrar", use_container_width=True):
                 if nom and rut and rut.strip():
                     with get_db() as db_alta:
@@ -669,7 +691,7 @@ if st.session_state.rol == "admin":
                                 nuevo_nombre = st.text_input("Nombre:", value=datos_c['nombre_cliente'])
                                 nuevo_telefono = st.text_input("Teléfono:", value=datos_c['telefono'])
                                 nueva_ruta = st.text_input("Ruta:", value=datos_c['ruta'])
-                                nueva_referencia = st.text_input("Referencias:", value=datos_c['referencia'])
+                                nueva_referencia = st.text_input("Referencias:", value=datos_c['referencia'], help="📷 Puedes incluir un link a una foto de la fachada aquí junto al texto.")
                                 nueva_cant_20 = st.number_input("Garrafones 20L:", min_value=0, value=int(datos_c['cantidad_20L']))
                                 nueva_cant_10 = st.number_input("Garrafones 10L:", min_value=0, value=int(datos_c['cantidad_10L']))
                                 if st.form_submit_button("💾 Guardar Cambios"):
@@ -867,7 +889,14 @@ else:
                             num_parada = f"#{idx} — " if st.session_state.ruta_optimizada else ""
                             with st.expander(f"{prefix_icon} {num_parada}{row['nombre_cliente']} | {num_tel}"):
                                 st.write(f"🛒 {row['cantidad_20L']} Garrafones 20L | {row['cantidad_10L']} Garrafones 10L")
-                                st.write(f"🏠 Referencias: {row['referencia']}")
+                                texto_ref, foto_url = extraer_foto_y_texto(row['referencia'])
+                                st.write(f"🏠 Referencias: {texto_ref if texto_ref else 'Sin notas'}")
+                                if foto_url:
+                                    st.markdown(f'<a href="{foto_url}" target="_blank">📷 Ver foto de referencia</a>', unsafe_allow_html=True)
+                                    try:
+                                        st.image(foto_url, width=250)
+                                    except Exception:
+                                        pass
                                 if row['latitud'] != 0 and row['longitud'] != 0:
                                     url_gmaps = f"https://www.google.com/maps/search/?api=1&query={row['latitud']},{row['longitud']}"
                                     st.markdown(f'<a href="{url_gmaps}" target="_blank"><button style="background-color:#1a73e8;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">🗺️ NAVEGAR</button></a>', unsafe_allow_html=True)
@@ -945,7 +974,7 @@ else:
             with col_form2:
                 lat_f_r = st.number_input("Latitud:", value=lat_val_r, format="%.6f")
                 lon_f_r = st.number_input("Longitud:", value=lon_val_r, format="%.6f")
-                ref_r = st.text_input("Referencias:")
+                ref_r = st.text_input("Referencias:", help="📷 Tip: puedes pegar aquí un link a una foto de la fachada (súbela a Google Fotos/Drive y comparte el link público).")
             if st.form_submit_button("💾 Guardar", use_container_width=True):
                 if nom_r and rut_r and rut_r.strip():
                     with get_db() as db_alta:
