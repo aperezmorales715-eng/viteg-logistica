@@ -200,6 +200,7 @@ def dialogo_cerrar_sesion():
     with c1:
         if st.button("✅ Sí, cerrar sesión", type="primary", use_container_width=True):
             st.session_state.rol = None
+            st.session_state.nav_actual = None
             st.rerun()
     with c2:
         if st.button("❌ Cancelar", use_container_width=True):
@@ -301,10 +302,18 @@ with col_titulo:
 SECCIONES_ADMIN = ["📍 Mapa", "🚚 Panel Chofer", "📝 Registro", "📲 Preventa", "📊 Administrador", "📈 Reportes"]
 SECCIONES_REP = ["🚚 Mi Ruta", "📝 Registrar", "📲 Preventa"]
 
-if "nav_actual" not in st.session_state:
+if st.session_state.get("nav_actual") is None:
     st.session_state.nav_actual = SECCIONES_ADMIN[0] if st.session_state.rol == "admin" else SECCIONES_REP[0]
 
 opciones_nav = SECCIONES_ADMIN if st.session_state.rol == "admin" else SECCIONES_REP
+
+# Auto-reparación: si nav_actual quedó apuntando a una sección que no existe
+# en el menú del rol actual (ej. se cerró sesión de admin y se entró como
+# repartidor sin recargar la página), se reinicia al primer botón válido
+# en vez de tronar con KeyError.
+if st.session_state.nav_actual not in opciones_nav:
+    st.session_state.nav_actual = opciones_nav[0]
+
 cols_nav = st.columns(3)
 for i, op in enumerate(opciones_nav):
     with cols_nav[i % 3]:
