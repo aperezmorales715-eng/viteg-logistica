@@ -1,5 +1,4 @@
 streamlit
-mysql-connector-python
 pandas
 folium
 streamlit-folium
