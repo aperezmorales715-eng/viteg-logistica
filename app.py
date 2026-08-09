@@ -7,15 +7,20 @@ import streamlit_autorefresh
 import urllib.parse
 from streamlit_geolocation import streamlit_geolocation
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
 import numpy as np
 import re
 import time
 from typing import Optional, Tuple, Dict, List
 import hashlib
+import plotly.express as px
+import plotly.graph_objects as go
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import base64
-import os
+import json
 
 # ==========================================
 # CONFIGURACIÓN DE LA PÁGINA
@@ -40,18 +45,170 @@ CONFIG = {
 }
 
 # ==========================================
+# IDIOMAS
+# ==========================================
+IDIOMAS = {
+    'es': {
+        'titulo': '💧 Sistema de Gestión Logística - Agua VITEG',
+        'subtitulo': 'Panel de control interno para el monitoreo de rutas, despacho de repartidores y análisis de demanda.',
+        'pendientes': '⏳ Pendientes',
+        'entregados': '✅ Entregados',
+        'total': '📊 Total',
+        'no_encontrados': '❌ No encontrados',
+        'progreso': '📊 Progreso',
+        'clientes': '👥 Clientes',
+        'garrafones_20': '💧 Garrafones 20L',
+        'garrafones_10': '💧 Garrafones 10L',
+        'tasa_entrega': '✅ Tasa de entrega',
+        'navegar': '🗺️ NAVEGAR',
+        'llamar': '📞 LLAMAR',
+        'whatsapp': '📲 WhatsApp',
+        'entregado': '✅ Marcar Entregado',
+        'no_encontrado': '❌ No Encontrado',
+        'registrar': '📝 Registrar Cliente',
+        'buscar': '🔍 Buscar',
+        'guardar': '💾 Guardar',
+        'cancelar': '❌ Cancelar',
+        'editar': '✏️ Editar',
+        'eliminar': '🗑️ Eliminar',
+        'exportar': '📥 Exportar',
+        'optimizar': '🧭 OPTIMIZAR CON IA',
+        'reordenar': '✋ AJUSTAR MANUALMENTE',
+        'original': '↩️ Orden original',
+        'cerrar_sesion': '🚪 Cerrar sesión',
+    },
+    'en': {
+        'titulo': '💧 Logistics Management System - Agua VITEG',
+        'subtitulo': 'Internal control panel for route monitoring, driver dispatch and demand analysis.',
+        'pendientes': '⏳ Pending',
+        'entregados': '✅ Delivered',
+        'total': '📊 Total',
+        'no_encontrados': '❌ Not found',
+        'progreso': '📊 Progress',
+        'clientes': '👥 Clients',
+        'garrafones_20': '💧 20L Bottles',
+        'garrafones_10': '💧 10L Bottles',
+        'tasa_entrega': '✅ Delivery rate',
+        'navegar': '🗺️ NAVIGATE',
+        'llamar': '📞 CALL',
+        'whatsapp': '📲 WhatsApp',
+        'entregado': '✅ Mark as Delivered',
+        'no_encontrado': '❌ Not Found',
+        'registrar': '📝 Register Client',
+        'buscar': '🔍 Search',
+        'guardar': '💾 Save',
+        'cancelar': '❌ Cancel',
+        'editar': '✏️ Edit',
+        'eliminar': '🗑️ Delete',
+        'exportar': '📥 Export',
+        'optimizar': '🧭 OPTIMIZE WITH AI',
+        'reordenar': '✋ MANUAL ADJUST',
+        'original': '↩️ Original order',
+        'cerrar_sesion': '🚪 Logout',
+    }
+}
+
+# ==========================================
+# ESTILOS MEJORADOS CON TEMA OSCURO/CLARO
+# ==========================================
+def aplicar_tema(tema):
+    if tema == "Oscuro":
+        return """
+        <style>
+            .stApp {
+                background-color: #0e1117;
+                color: #ffffff;
+            }
+            [data-testid="stMetric"] {
+                background-color: #1e1e2e;
+                border-color: #2d2d44;
+                color: #ffffff;
+            }
+            [data-testid="stMetricLabel"] {
+                color: #a0a0b0;
+            }
+            [data-testid="stMetricValue"] {
+                color: #ffffff;
+            }
+            [data-testid="stExpander"] {
+                background-color: #1e1e2e;
+                border-color: #2d2d44;
+            }
+            [data-testid="stExpander"] summary {
+                color: #ffffff;
+                background-color: #2d2d44;
+            }
+            div[data-baseweb="select"] > div {
+                background-color: #1e1e2e;
+                color: white;
+            }
+            .stTextInput input, .stNumberInput input, .stTextArea textarea {
+                background-color: #1e1e2e;
+                color: white;
+                border-color: #2d2d44 !important;
+            }
+            div.stButton > button {
+                background-color: #2d2d44;
+                color: white;
+                border-color: #3d3d5c;
+            }
+            div.stButton > button[kind="primary"] {
+                background-color: #1a73e8;
+                border-color: #1a73e8;
+            }
+            .stAlert {
+                background-color: #1e1e2e;
+                color: #ffffff;
+            }
+            .stDataFrame {
+                background-color: #1e1e2e;
+            }
+            .stDataFrame table {
+                color: #ffffff;
+            }
+            .stDataFrame thead {
+                background-color: #2d2d44;
+            }
+            .stSidebar {
+                background-color: #1a1a2e;
+            }
+            .stSidebar .stMarkdown {
+                color: #ffffff;
+            }
+            hr {
+                border-color: #2d2d44;
+            }
+            .stProgress > div > div {
+                background-color: #2d2d44;
+            }
+            .stProgress > div > div > div {
+                background: linear-gradient(90deg, #1a73e8, #25D366);
+            }
+            .stSelectbox label, .stTextInput label, .stNumberInput label {
+                color: #ffffff;
+            }
+        </style>
+        """
+    else:
+        return """
+        <style>
+            .stApp {
+                background-color: #ffffff;
+            }
+        </style>
+        """
+
+# ==========================================
 # CONFIGURACIÓN DE BASE DE DATOS MEJORADA
 # ==========================================
 def get_db_config():
-    """Obtiene la configuración de la base de datos con valores por defecto."""
     try:
-        # Intentar obtener de secrets
         config = {
-            'host': st.secrets.get("DB_HOST", "localhost"),
+            'host': st.secrets.get("DB_HOST", "reseau.proxy.rlwy.net"),
             'user': st.secrets.get("DB_USER", "root"),
             'password': st.secrets.get("DB_PASSWORD", ""),
-            'database': st.secrets.get("DB_NAME", "viteg"),
-            'port': int(st.secrets.get("DB_PORT", 3306)),
+            'database': st.secrets.get("DB_NAME", "railway"),
+            'port': int(st.secrets.get("DB_PORT", 12389)),
             'connection_timeout': 30,
             'autocommit': True,
             'charset': 'utf8mb4',
@@ -62,13 +219,12 @@ def get_db_config():
         }
         return config
     except Exception:
-        # Si no hay secrets, usar valores por defecto o variables de entorno
         return {
-            'host': os.environ.get('DB_HOST', 'localhost'),
-            'user': os.environ.get('DB_USER', 'root'),
-            'password': os.environ.get('DB_PASSWORD', ''),
-            'database': os.environ.get('DB_NAME', 'viteg'),
-            'port': int(os.environ.get('DB_PORT', 3306)),
+            'host': 'reseau.proxy.rlwy.net',
+            'user': 'root',
+            'password': '',
+            'database': 'railway',
+            'port': 12389,
             'connection_timeout': 30,
             'autocommit': True,
             'charset': 'utf8mb4',
@@ -79,16 +235,13 @@ def get_db_config():
         }
 
 # ==========================================
-# CONEXIÓN A BD CON MANEJO DE ERRORES MEJORADO
+# CONEXIÓN A BD
 # ==========================================
 @contextmanager
 def get_db():
-    """Context manager para conexiones a la base de datos con manejo robusto."""
     db = None
     try:
         config = get_db_config()
-        
-        # Intentar conectar con reintentos
         max_retries = 3
         retry_delay = 2
         
@@ -111,20 +264,14 @@ def get_db():
             
     except mysql.connector.Error as e:
         error_code = e.errno
-        error_msg = str(e)
-        
-        # Mensajes de error más amigables
         if error_code == 2003:
-            st.error("❌ No se puede conectar al servidor MySQL. Verifica que el servidor esté en ejecución y la configuración de red.")
+            st.error("❌ No se puede conectar al servidor MySQL. Verifica la configuración.")
         elif error_code == 1045:
-            st.error("❌ Acceso denegado. Verifica el usuario y contraseña.")
+            st.error("❌ Acceso denegado. Verifica usuario y contraseña.")
         elif error_code == 1049:
-            st.error("❌ La base de datos no existe. Verifica el nombre de la base de datos.")
-        elif error_code == 2013:
-            st.error("❌ Error de conexión con el servidor MySQL. Verifica que el servidor esté en ejecución.")
+            st.error("❌ La base de datos no existe.")
         else:
-            st.error(f"❌ Error de conexión: {error_msg}")
-        
+            st.error(f"❌ Error de conexión: {e}")
         yield None
     except Exception as e:
         st.error(f"❌ Error inesperado: {e}")
@@ -140,7 +287,6 @@ def get_db():
 # VERIFICACIÓN DE CONEXIÓN
 # ==========================================
 def verificar_conexion_bd():
-    """Verifica si la conexión a la base de datos es exitosa."""
     with get_db() as db:
         if db:
             try:
@@ -154,267 +300,9 @@ def verificar_conexion_bd():
     return False
 
 # ==========================================
-# FUNCIÓN PARA CREAR TABLAS SI NO EXISTEN
-# ==========================================
-def inicializar_bd():
-    """Crea las tablas necesarias si no existen."""
-    with get_db() as db:
-        if db:
-            try:
-                cursor = db.cursor()
-                
-                # Crear tabla pedidos
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS pedidos (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        nombre_cliente VARCHAR(255) NOT NULL,
-                        telefono VARCHAR(20),
-                        ruta VARCHAR(100),
-                        cantidad_20L INT DEFAULT 0,
-                        cantidad_10L INT DEFAULT 0,
-                        referencia TEXT,
-                        estatus ENUM('pendiente', 'entregado', 'no encontrado') DEFAULT 'pendiente',
-                        latitud DECIMAL(10, 8) DEFAULT 0,
-                        longitud DECIMAL(11, 8) DEFAULT 0,
-                        direccion TEXT,
-                        fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        INDEX idx_ruta (ruta),
-                        INDEX idx_estatus (estatus),
-                        INDEX idx_nombre (nombre_cliente)
-                    )
-                """)
-                
-                # Crear tabla usuarios (para futura expansión)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS usuarios (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        nombre VARCHAR(100),
-                        email VARCHAR(100) UNIQUE,
-                        password_hash VARCHAR(255),
-                        rol ENUM('admin', 'repartidor') DEFAULT 'repartidor',
-                        activo BOOLEAN DEFAULT TRUE,
-                        fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                
-                db.commit()
-                cursor.close()
-                return True
-            except Exception as e:
-                st.error(f"❌ Error al inicializar la base de datos: {e}")
-                return False
-    return False
-
-# ==========================================
-# ESTILO VISUAL MEJORADO
-# ==========================================
-st.markdown("""
-<style>
-    :root {
-        --viteg-azul: #1a73e8;
-        --viteg-azul-claro: #EAF2FE;
-        --viteg-azul-oscuro: #1557b0;
-        --viteg-verde: #25D366;
-        --viteg-rojo: #ea4335;
-        --viteg-naranja: #fbbc04;
-    }
-
-    .main {
-        padding: 0rem 1rem;
-    }
-
-    div.stButton > button {
-        border-radius: 24px;
-        font-weight: 600;
-        border: 1px solid #DCEBFC;
-        transition: all 0.3s ease;
-        padding: 0.5rem 1rem;
-    }
-    
-    div.stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(26, 115, 232, 0.3);
-    }
-    
-    div.stButton > button[kind="primary"] {
-        background-color: var(--viteg-azul);
-        border-color: var(--viteg-azul);
-        color: white;
-    }
-    
-    div.stButton > button[kind="primary"]:hover {
-        background-color: var(--viteg-azul-oscuro);
-    }
-
-    [data-testid="stMetric"] {
-        background-color: var(--viteg-azul-claro);
-        border-radius: 14px;
-        padding: 16px 12px;
-        border: 1px solid #DCEBFC;
-        transition: all 0.3s ease;
-    }
-    
-    [data-testid="stMetric"]:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    
-    [data-testid="stMetricLabel"] {
-        font-weight: 600;
-        color: #333;
-    }
-    
-    [data-testid="stMetricValue"] {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: var(--viteg-azul);
-    }
-
-    [data-testid="stExpander"] {
-        border-radius: 14px;
-        border: 1px solid #E3ECF5;
-        margin-bottom: 12px;
-        overflow: hidden;
-        transition: all 0.3s ease;
-        background-color: white;
-    }
-    
-    [data-testid="stExpander"]:hover {
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    }
-    
-    [data-testid="stExpander"] summary {
-        font-weight: 600;
-        padding: 12px 8px;
-        background-color: #f8fafc;
-    }
-
-    div[data-baseweb="select"] > div, 
-    .stTextInput input, 
-    .stNumberInput input, 
-    .stTextArea textarea {
-        border-radius: 10px !important;
-        border: 1px solid #DCEBFC !important;
-        transition: border-color 0.3s ease;
-    }
-    
-    div[data-baseweb="select"] > div:focus-within,
-    .stTextInput input:focus,
-    .stNumberInput input:focus,
-    .stTextArea textarea:focus {
-        border-color: var(--viteg-azul) !important;
-        box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2) !important;
-    }
-
-    .stProgress > div > div > div {
-        background: linear-gradient(90deg, var(--viteg-azul), var(--viteg-verde));
-        border-radius: 10px;
-    }
-
-    hr {
-        margin: 0.8rem 0;
-        opacity: 0.15;
-        border: none;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, var(--viteg-azul), transparent);
-    }
-
-    .stAlert {
-        border-radius: 12px;
-        border-left: 4px solid var(--viteg-azul);
-    }
-    
-    .stAlert > div {
-        padding: 0.8rem 1.2rem;
-    }
-
-    section[data-testid="stSidebar"] {
-        background-color: #f8fafc;
-        border-right: 1px solid #e5e7eb;
-    }
-    
-    section[data-testid="stSidebar"] > div {
-        padding-top: 2rem;
-    }
-
-    .badge {
-        display: inline-block;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        margin: 0.1rem;
-    }
-    
-    .badge-success {
-        background-color: #d4edda;
-        color: #155724;
-    }
-    
-    .badge-warning {
-        background-color: #fff3cd;
-        color: #856404;
-    }
-    
-    .badge-danger {
-        background-color: #f8d7da;
-        color: #721c24;
-    }
-    
-    .badge-info {
-        background-color: #d1ecf1;
-        color: #0c5460;
-    }
-
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    
-    .fade-in {
-        animation: fadeIn 0.5s ease-out;
-    }
-
-    .stDataFrame {
-        border-radius: 12px;
-        overflow: hidden;
-        border: 1px solid #E3ECF5;
-    }
-    
-    .stDataFrame table {
-        font-size: 0.9rem;
-    }
-    
-    .stDataFrame thead {
-        background-color: #f8fafc;
-    }
-
-    ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-    }
-    
-    ::-webkit-scrollbar-track {
-        background: #f1f1f1;
-        border-radius: 10px;
-    }
-    
-    ::-webkit-scrollbar-thumb {
-        background: var(--viteg-azul);
-        border-radius: 10px;
-    }
-    
-    ::-webkit-scrollbar-thumb:hover {
-        background: var(--viteg-azul-oscuro);
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ==========================================
-# FUNCIONES DE SEGURIDAD
+# FUNCIONES DE SEGURIDAD MEJORADAS
 # ==========================================
 def hash_password(password: str) -> str:
-    """Genera un hash seguro de la contraseña."""
     salt = st.secrets.get("PASSWORD_SALT", "viteg_salt_2024")
     return hashlib.pbkdf2_hmac(
         'sha256',
@@ -424,11 +312,9 @@ def hash_password(password: str) -> str:
     ).hex()
 
 def verificar_contraseña(password: str, hash_almacenado: str) -> bool:
-    """Verifica si la contraseña coincide con el hash almacenado."""
     return hash_password(password) == hash_almacenado
 
 def verificar_sesion():
-    """Verifica si la sesión ha expirado."""
     if 'session_start' in st.session_state:
         tiempo_transcurrido = time.time() - st.session_state.session_start
         if tiempo_transcurrido > CONFIG['SESSION_TIMEOUT']:
@@ -439,103 +325,48 @@ def verificar_sesion():
     else:
         st.session_state.session_start = time.time()
 
-# ==========================================
-# LOGIN MEJORADO
-# ==========================================
-CLAVE_ADMIN = st.secrets.get("CLAVE_ADMIN", "viteg2024")
-CLAVE_REPARTIDOR = st.secrets.get("CLAVE_REPARTIDOR", "reparto123")
-HASH_ADMIN = hash_password(CLAVE_ADMIN)
-HASH_REPARTIDOR = hash_password(CLAVE_REPARTIDOR)
+def registrar_accion(usuario, accion):
+    with get_db() as db:
+        if db:
+            try:
+                cursor = db.cursor()
+                cursor.execute(
+                    "INSERT INTO logs (usuario, accion, fecha) VALUES (%s, %s, NOW())",
+                    (usuario, accion)
+                )
+                db.commit()
+                cursor.close()
+            except:
+                pass
 
-if "rol" not in st.session_state:
-    st.session_state.rol = None
-    st.session_state.intentos_fallidos = 0
-
-# Verificar conexión a BD antes del login
-if not verificar_conexion_bd():
-    st.error("""
-    ⚠️ **No se puede conectar a la base de datos**
-    
-    Por favor, verifica que:
-    1. El servidor MySQL esté en ejecución
-    2. La configuración en `.streamlit/secrets.toml` sea correcta
-    3. El usuario y contraseña sean válidos
-    4. La base de datos exista
-    
-    **Configuración actual:**
-    """)
-    
+# ==========================================
+# FUNCIONES DE CORREO
+# ==========================================
+def enviar_correo(destinatario, asunto, mensaje):
     try:
-        config = get_db_config()
-        st.code(f"""
-        Host: {config['host']}
-        Puerto: {config['port']}
-        Usuario: {config['user']}
-        Base de datos: {config['database']}
-        """)
+        remitente = st.secrets.get("EMAIL_USER", "")
+        password = st.secrets.get("EMAIL_PASS", "")
+        
+        if not remitente or not password:
+            return False
+        
+        msg = MIMEMultipart()
+        msg['Subject'] = asunto
+        msg['From'] = remitente
+        msg['To'] = destinatario
+        
+        msg.attach(MIMEText(mensaje, 'plain'))
+        
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.starttls()
+            server.login(remitente, password)
+            server.send_message(msg)
+        return True
     except:
-        pass
-    
-    st.info("💡 Puedes configurar la base de datos creando el archivo `.streamlit/secrets.toml`")
-    
-    # Opción para inicializar BD
-    if st.button("🔄 Intentar inicializar base de datos", use_container_width=True):
-        if inicializar_bd():
-            st.success("✅ Base de datos inicializada correctamente")
-            st.rerun()
-        else:
-            st.error("❌ No se pudo inicializar la base de datos")
-    
-    st.stop()
-
-if st.session_state.rol is None:
-    if st.session_state.intentos_fallidos >= 5:
-        st.error("🔒 Demasiados intentos fallidos. Espera 5 minutos.")
-        time.sleep(300)
-        st.session_state.intentos_fallidos = 0
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        try:
-            st.image("logo.jpeg", width=250)
-        except:
-            st.markdown("### 💧 Agua VITEG")
-        st.title("Sistema de Gestión Logística")
-        st.markdown("---")
-        
-        clave = st.text_input("🔑 Contraseña:", type="password", placeholder="Ingresa tu contraseña")
-        
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("👔 Administrador", use_container_width=True, type="primary"):
-                if clave and verificar_contraseña(clave, HASH_ADMIN):
-                    st.session_state.rol = "admin"
-                    st.session_state.session_start = time.time()
-                    st.session_state.intentos_fallidos = 0
-                    st.rerun()
-                else:
-                    st.session_state.intentos_fallidos += 1
-                    st.error(f"❌ Contraseña incorrecta. Intentos: {st.session_state.intentos_fallidos}/5")
-        
-        with col_btn2:
-            if st.button("🚚 Repartidor", use_container_width=True):
-                if clave and verificar_contraseña(clave, HASH_REPARTIDOR):
-                    st.session_state.rol = "repartidor"
-                    st.session_state.session_start = time.time()
-                    st.session_state.intentos_fallidos = 0
-                    st.rerun()
-                else:
-                    st.session_state.intentos_fallidos += 1
-                    st.error(f"❌ Contraseña incorrecta. Intentos: {st.session_state.intentos_fallidos}/5")
-        
-        st.markdown("---")
-        st.caption("💡 Contacta al administrador si necesitas acceso.")
-    st.stop()
-
-verificar_sesion()
+        return False
 
 # ==========================================
-# FUNCIONES AUXILIARES
+# FUNCIONES AUXILIARES MEJORADAS
 # ==========================================
 def reiniciar_ruta_completa(nombre_ruta: str) -> bool:
     with get_db() as db:
@@ -587,6 +418,13 @@ def exportar_excel(df: pd.DataFrame) -> bytes:
         st.error(f"Error al exportar a Excel: {e}")
         return b""
 
+def exportar_csv(df: pd.DataFrame) -> bytes:
+    try:
+        return df.to_csv(index=False).encode('utf-8')
+    except Exception as e:
+        st.error(f"Error al exportar a CSV: {e}")
+        return b""
+
 def optimizar_ruta(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -631,110 +469,100 @@ def validar_telefono(telefono: str) -> bool:
     return len(tel) >= 10 and len(tel) <= 15
 
 # ==========================================
-# INICIALIZAR BASE DE DATOS (si es necesario)
+# LOGIN MEJORADO
 # ==========================================
-if verificar_conexion_bd():
-    inicializar_bd()
+CLAVE_ADMIN = st.secrets.get("CLAVE_ADMIN", "viteg2024")
+CLAVE_REPARTIDOR = st.secrets.get("CLAVE_REPARTIDOR", "reparto123")
+HASH_ADMIN = hash_password(CLAVE_ADMIN)
+HASH_REPARTIDOR = hash_password(CLAVE_REPARTIDOR)
+
+if "rol" not in st.session_state:
+    st.session_state.rol = None
+    st.session_state.intentos_fallidos = 0
+    st.session_state.idioma = "es"
+    st.session_state.tema = "Claro"
+    st.session_state.total_anterior = 0
+
+# Verificar conexión a BD antes del login
+if not verificar_conexion_bd():
+    st.error("""
+    ⚠️ **No se puede conectar a la base de datos**
+    
+    Por favor, verifica que:
+    1. La configuración en `.streamlit/secrets.toml` sea correcta
+    2. El usuario y contraseña sean válidos
+    3. La base de datos exista
+    """)
+    st.stop()
+
+if st.session_state.rol is None:
+    # Selector de idioma en el login
+    col_idioma, _ = st.columns([1, 4])
+    with col_idioma:
+        idioma_sel = st.selectbox("🌐 Idioma", ["Español", "English"], key="login_idioma")
+        st.session_state.idioma = "es" if idioma_sel == "Español" else "en"
+    
+    if st.session_state.intentos_fallidos >= 5:
+        st.error("🔒 Demasiados intentos fallidos. Espera 5 minutos.")
+        time.sleep(300)
+        st.session_state.intentos_fallidos = 0
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        try:
+            st.image("logo.jpeg", width=250)
+        except:
+            st.markdown("### 💧 Agua VITEG")
+        
+        txt = IDIOMAS[st.session_state.idioma]
+        st.title(txt['titulo'])
+        st.markdown("---")
+        
+        clave = st.text_input("🔑 Contraseña:", type="password", placeholder="Ingresa tu contraseña")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("👔 Administrador", use_container_width=True, type="primary"):
+                if clave and verificar_contraseña(clave, HASH_ADMIN):
+                    st.session_state.rol = "admin"
+                    st.session_state.session_start = time.time()
+                    st.session_state.intentos_fallidos = 0
+                    registrar_accion("admin", "Inicio de sesión")
+                    st.rerun()
+                else:
+                    st.session_state.intentos_fallidos += 1
+                    st.error(f"❌ Contraseña incorrecta. Intentos: {st.session_state.intentos_fallidos}/5")
+        
+        with col_btn2:
+            if st.button("🚚 Repartidor", use_container_width=True):
+                if clave and verificar_contraseña(clave, HASH_REPARTIDOR):
+                    st.session_state.rol = "repartidor"
+                    st.session_state.session_start = time.time()
+                    st.session_state.intentos_fallidos = 0
+                    registrar_accion("repartidor", "Inicio de sesión")
+                    st.rerun()
+                else:
+                    st.session_state.intentos_fallidos += 1
+                    st.error(f"❌ Contraseña incorrecta. Intentos: {st.session_state.intentos_fallidos}/5")
+        
+        st.markdown("---")
+        st.caption("💡 Contacta al administrador si necesitas acceso.")
+    st.stop()
+
+verificar_sesion()
 
 # ==========================================
-# DIÁLOGOS
+# CONFIGURACIÓN DE TEMA E IDIOMA
 # ==========================================
-@st.dialog("🚪 Cerrar sesión")
-def dialogo_cerrar_sesion():
-    st.warning("¿Estás seguro que deseas cerrar sesión?")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("✅ Sí, cerrar sesión", type="primary", use_container_width=True):
-            st.session_state.rol = None
-            st.session_state.nav_actual = None
-            st.session_state.session_start = None
-            st.rerun()
-    with c2:
-        if st.button("❌ Cancelar", use_container_width=True):
-            st.rerun()
+lang = st.session_state.idioma
+txt = IDIOMAS[lang]
 
-@st.dialog("⚠️ Confirmar reinicio de TODAS las rutas")
-def dialogo_reiniciar_todo():
-    st.error("⚠️ Esta acción marcará TODOS los pedidos como 'pendiente'.\nNo se puede deshacer.")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("✅ Sí, reiniciar todo", type="primary", use_container_width=True):
-            with get_db() as db:
-                if db:
-                    try:
-                        cursor = db.cursor()
-                        cursor.execute("UPDATE pedidos SET estatus = 'pendiente'")
-                        db.commit()
-                        cursor.close()
-                        st.success("✅ Todos los pedidos reiniciados")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-    with c2:
-        if st.button("❌ Cancelar", use_container_width=True):
-            st.rerun()
-
-@st.dialog("⚠️ Confirmar reinicio de ruta")
-def dialogo_reiniciar_ruta(nombre_ruta: str):
-    st.error(f"⚠️ Esta acción marcará todos los pedidos de **'{nombre_ruta}'** como 'pendiente'.")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("✅ Sí, reiniciar", type="primary", use_container_width=True):
-            if reiniciar_ruta_completa(nombre_ruta):
-                st.success(f"✅ Ruta '{nombre_ruta}' reiniciada")
-                time.sleep(1)
-                st.rerun()
-    with c2:
-        if st.button("❌ Cancelar", use_container_width=True):
-            st.rerun()
-
-@st.dialog("🗑️ Confirmar eliminación de cliente")
-def dialogo_eliminar_cliente(id_cliente: int, nombre_cliente: str):
-    st.error(f"⚠️ ¿Eliminar permanentemente a **{nombre_cliente}**?\nEsta acción no se puede deshacer.")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("✅ Sí, eliminar", type="primary", use_container_width=True):
-            with get_db() as db:
-                if db:
-                    try:
-                        cursor = db.cursor()
-                        cursor.execute("DELETE FROM pedidos WHERE id = %s", (id_cliente,))
-                        db.commit()
-                        cursor.close()
-                        st.success("✅ Cliente eliminado")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-    with c2:
-        if st.button("❌ Cancelar", use_container_width=True):
-            st.rerun()
+# Aplicar tema
+tema_actual = st.session_state.get("tema", "Claro")
+st.markdown(aplicar_tema(tema_actual), unsafe_allow_html=True)
 
 # ==========================================
-# ESTADOS DE SESIÓN
-# ==========================================
-defaults = {
-    "ultimo_conteo_pedidos": 0,
-    "id_max_previo": 0,
-    "id_cliente_editar": None,
-    "alerta_pendiente": False,
-    "detalles_nuevo_pedido": {},
-    "ruta_optimizada": False,
-    "ruta_sel_previa": None,
-    "df_ruta_ordenada": None,
-    "orden_manual": None,
-    "modo_reordenar": False,
-    "lista_ids_manual": [],
-    "lista_ids_ruta": None,
-    "ultimo_refresh": time.time(),
-}
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-# ==========================================
-# SIDEBAR
+# SIDEBAR MEJORADO
 # ==========================================
 with st.sidebar:
     try:
@@ -744,6 +572,23 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # Selector de tema e idioma
+    col_tema, col_idioma = st.columns(2)
+    with col_tema:
+        nuevo_tema = st.selectbox("🎨 Tema", ["Claro", "Oscuro"], key="tema_selector")
+        if nuevo_tema != st.session_state.get("tema", "Claro"):
+            st.session_state.tema = nuevo_tema
+            st.rerun()
+    with col_idioma:
+        nuevo_idioma = st.selectbox("🌐 Idioma", ["Español", "English"], key="idioma_selector")
+        nuevo_lang = "es" if nuevo_idioma == "Español" else "en"
+        if nuevo_lang != st.session_state.get("idioma", "es"):
+            st.session_state.idioma = nuevo_lang
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Información del usuario
     rol_icon = "👔" if st.session_state.rol == "admin" else "🚚"
     rol_name = "Administrador" if st.session_state.rol == "admin" else "Repartidor"
     st.markdown(f"**{rol_icon} {rol_name}**")
@@ -758,6 +603,7 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # Estadísticas rápidas
     with get_db() as db:
         if db:
             try:
@@ -769,15 +615,18 @@ with st.sidebar:
                 cursor.close()
                 
                 col1, col2 = st.columns(2)
-                col1.metric("⏳ Pendientes", pendientes_total)
-                col2.metric("✅ Entregados", entregados_total)
+                col1.metric(txt['pendientes'], pendientes_total)
+                col2.metric(txt['entregados'], entregados_total)
             except:
                 pass
     
     st.markdown("---")
     
-    if st.button("🚪 Cerrar sesión", use_container_width=True):
-        dialogo_cerrar_sesion()
+    if st.button(txt['cerrar_sesion'], use_container_width=True):
+        st.session_state.rol = None
+        st.session_state.nav_actual = None
+        st.session_state.session_start = None
+        st.rerun()
 
 # ==========================================
 # TÍTULO PRINCIPAL
@@ -787,10 +636,10 @@ try:
     with col_logo:
         st.image("logo.jpeg", width=100)
     with col_titulo:
-        st.title("💧 Sistema de Gestión Logística - Agua VITEG")
-        st.markdown("Panel de control interno para el monitoreo de rutas, despacho de repartidores y análisis de demanda.")
+        st.title(txt['titulo'])
+        st.markdown(txt['subtitulo'])
 except:
-    st.title("💧 Sistema de Gestión Logística - Agua VITEG")
+    st.title(txt['titulo'])
 
 # ==========================================
 # NAVEGACIÓN
@@ -832,7 +681,29 @@ else:
     seccion_rep = _mapa_rep[st.session_state.nav_actual]
 
 # ==========================================
-# DETECCIÓN DE NUEVOS PEDIDOS (solo si hay BD)
+# ESTADOS DE SESIÓN
+# ==========================================
+defaults = {
+    "ultimo_conteo_pedidos": 0,
+    "id_max_previo": 0,
+    "id_cliente_editar": None,
+    "alerta_pendiente": False,
+    "detalles_nuevo_pedido": {},
+    "ruta_optimizada": False,
+    "ruta_sel_previa": None,
+    "df_ruta_ordenada": None,
+    "orden_manual": None,
+    "modo_reordenar": False,
+    "lista_ids_manual": [],
+    "lista_ids_ruta": None,
+    "ultimo_refresh": time.time(),
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+# ==========================================
+# DETECCIÓN DE NUEVOS PEDIDOS
 # ==========================================
 if verificar_conexion_bd():
     with get_db() as db:
@@ -884,17 +755,22 @@ if st.session_state.alerta_pendiente:
     st.divider()
 
 # ==========================================
-# RENDERIZADO ADMIN (solo si hay BD)
+# RENDERIZADO ADMIN
 # ==========================================
 if st.session_state.rol == "admin":
 
     # --- MAPA ---
     if seccion == "📍 Mapa":
         st.subheader("🗺️ Monitoreo Geográfico de Pedidos")
-        streamlit_autorefresh.st_autorefresh(
-            interval=CONFIG['REFRESH_INTERVAL'], 
-            key="mapa_refresh"
-        )
+        
+        # Control de auto-refresh
+        col_refresh, _ = st.columns([1, 3])
+        with col_refresh:
+            tiempo_refresh = st.slider("⏱️ Actualizar cada (segundos)", 5, 60, 20)
+            streamlit_autorefresh.st_autorefresh(
+                interval=tiempo_refresh * 1000, 
+                key="mapa_refresh"
+            )
         
         if not verificar_conexion_bd():
             st.error("❌ No hay conexión a la base de datos. No se puede cargar el mapa.")
@@ -943,11 +819,12 @@ if st.session_state.rol == "admin":
                             else:
                                 df_filtrado = df_mapa
                             
+                            # Métricas
                             c1, c2, c3, c4 = st.columns(4)
-                            c1.metric("📍 Total visibles", len(df_mapa))
-                            c2.metric("⏳ Pendientes", len(df_mapa[df_mapa['estatus'] == 'pendiente']))
-                            c3.metric("✅ Entregados", len(df_mapa[df_mapa['estatus'] == 'entregado']))
-                            c4.metric("❌ No encontrados", len(df_mapa[df_mapa['estatus'] == 'no encontrado']))
+                            c1.metric(txt['total'], len(df_mapa))
+                            c2.metric(txt['pendientes'], len(df_mapa[df_mapa['estatus'] == 'pendiente']))
+                            c3.metric(txt['entregados'], len(df_mapa[df_mapa['estatus'] == 'entregado']))
+                            c4.metric(txt['no_encontrados'], len(df_mapa[df_mapa['estatus'] == 'no encontrado']))
                             
                             if not df_filtrado.empty and df_filtrado['latitud'].notna().any():
                                 centro_lat = df_filtrado['latitud'].mean()
@@ -1043,10 +920,10 @@ if st.session_state.rol == "admin":
                                     total_ruta_completa = len(df_todos)
                             
                             c1, c2, c3 = st.columns(3)
-                            c1.metric("📦 Pendientes", total_ruta)
-                            c2.metric("✅ Entregados", entregados_hoy)
+                            c1.metric(txt['pendientes'], total_ruta)
+                            c2.metric(txt['entregados'], entregados_hoy)
                             progreso = int((entregados_hoy / total_ruta_completa) * 100) if total_ruta_completa > 0 else 0
-                            c3.metric("📊 Progreso", f"{progreso}%")
+                            c3.metric(txt['progreso'], f"{progreso}%")
                             st.progress(progreso / 100)
                             st.divider()
                             
@@ -1059,7 +936,7 @@ if st.session_state.rol == "admin":
                             
                             col_opt1, col_opt2, col_opt3 = st.columns(3)
                             with col_opt1:
-                                if st.button("🧭 OPTIMIZAR CON IA", use_container_width=True, type="primary", key="opt_admin"):
+                                if st.button(txt['optimizar'], use_container_width=True, type="primary", key="opt_admin"):
                                     if len(coords_validas) >= 2:
                                         df_optimizado = pd.concat([
                                             optimizar_ruta(coords_validas),
@@ -1074,11 +951,11 @@ if st.session_state.rol == "admin":
                                         st.warning("⚠️ Se necesitan al menos 2 clientes con GPS para optimizar.")
                             
                             with col_opt2:
-                                if st.button("✋ AJUSTAR MANUALMENTE", use_container_width=True, key="rea_admin"):
+                                if st.button(txt['reordenar'], use_container_width=True, key="rea_admin"):
                                     st.session_state.modo_reordenar = True
                             
                             with col_opt3:
-                                if st.button("↩️ Orden original", use_container_width=True, key="ori_admin"):
+                                if st.button(txt['original'], use_container_width=True, key="ori_admin"):
                                     st.session_state.ruta_optimizada = False
                                     st.session_state.df_ruta_ordenada = None
                                     st.session_state.orden_manual = None
@@ -1179,7 +1056,7 @@ if st.session_state.rol == "admin":
                                             f'<a href="{url_gmaps}" target="_blank">'
                                             f'<button style="background-color:#1a73e8;color:white;border:none;'
                                             f'padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">'
-                                            f'🗺️ NAVEGAR</button></a>',
+                                            f'{txt["navegar"]}</button></a>',
                                             unsafe_allow_html=True
                                         )
                                     
@@ -1190,7 +1067,7 @@ if st.session_state.rol == "admin":
                                                 f'<a href="tel:{num_tel}">'
                                                 f'<button style="background-color:#007BFF;color:white;border:none;'
                                                 f'padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">'
-                                                f'📞 LLAMAR</button></a>',
+                                                f'{txt["llamar"]}</button></a>',
                                                 unsafe_allow_html=True
                                             )
                                         with c2:
@@ -1216,7 +1093,7 @@ if st.session_state.rol == "admin":
                                     
                                     col_e1, col_e2 = st.columns(2)
                                     with col_e1:
-                                        if st.button("✅ Marcar Entregado", key=f"ent_a_{row['id']}"):
+                                        if st.button(txt['entregado'], key=f"ent_a_{row['id']}"):
                                             cursor = db.cursor()
                                             cursor.execute(
                                                 "UPDATE pedidos SET estatus = 'entregado' WHERE id = %s",
@@ -1226,11 +1103,12 @@ if st.session_state.rol == "admin":
                                             cursor.close()
                                             st.session_state.ruta_optimizada = False
                                             st.session_state.df_ruta_ordenada = None
+                                            registrar_accion("admin", f"Marcó como entregado: {row['nombre_cliente']}")
                                             st.rerun()
                                     
                                     with col_e2:
                                         if row['estatus'] != 'no encontrado':
-                                            if st.button("❌ No Encontrado", key=f"noe_a_{row['id']}"):
+                                            if st.button(txt['no_encontrado'], key=f"noe_a_{row['id']}"):
                                                 cursor = db.cursor()
                                                 cursor.execute(
                                                     "UPDATE pedidos SET estatus = 'no encontrado' WHERE id = %s",
@@ -1238,6 +1116,7 @@ if st.session_state.rol == "admin":
                                                 )
                                                 db.commit()
                                                 cursor.close()
+                                                registrar_accion("admin", f"Marcó como no encontrado: {row['nombre_cliente']}")
                                                 st.rerun()
                         else:
                             st.success("🚚 ¡No hay pedidos pendientes!")
@@ -1247,7 +1126,7 @@ if st.session_state.rol == "admin":
 
     # --- REGISTRO ---
     if seccion == "📝 Registro":
-        st.subheader("📝 Registro de Pedidos")
+        st.subheader(txt['registrar'])
         
         if not verificar_conexion_bd():
             st.error("❌ No hay conexión a la base de datos. No se puede registrar.")
@@ -1266,7 +1145,7 @@ if st.session_state.rol == "admin":
                         pass
             
             st.markdown("### 🔍 Buscador de Clientes")
-            busqueda = st.text_input("Buscar por nombre o teléfono:", key="busqueda_admin")
+            busqueda = st.text_input(f"{txt['buscar']} por nombre o teléfono:", key="busqueda_admin")
             
             if busqueda:
                 with get_db() as db_bus:
@@ -1319,7 +1198,7 @@ if st.session_state.rol == "admin":
                     )
                     st.caption("Ejemplo: Casa blanca, portón verde, link: https://fotos.com/...")
                 
-                if st.form_submit_button("💾 Guardar y Registrar", use_container_width=True, type="primary"):
+                if st.form_submit_button(txt['guardar'], use_container_width=True, type="primary"):
                     if not nom or not nom.strip():
                         st.error("❌ El nombre del cliente es obligatorio")
                     elif not rut or not rut.strip():
@@ -1342,6 +1221,7 @@ if st.session_state.rol == "admin":
                                     cursor_a.close()
                                     
                                     st.success(f"🎉 Cliente '{nom}' registrado en ruta: {rut}")
+                                    registrar_accion("admin", f"Registró cliente: {nom}")
                                     
                                     if tel and validar_telefono(tel):
                                         msg_conf = f"Hola {nom}, su pedido de Agua VITEG 💧 fue registrado. ¡Gracias!"
@@ -1437,10 +1317,15 @@ if st.session_state.rol == "admin":
     # --- ADMINISTRADOR ---
     if seccion == "📊 Administrador":
         st.subheader("📊 Panel Administrador")
-        streamlit_autorefresh.st_autorefresh(
-            interval=15000,
-            key="datarefresh"
-        )
+        
+        # Control de auto-refresh
+        col_refresh, _ = st.columns([1, 3])
+        with col_refresh:
+            tiempo_refresh_admin = st.slider("⏱️ Actualizar cada (segundos)", 5, 60, 15, key="admin_refresh")
+            streamlit_autorefresh.st_autorefresh(
+                interval=tiempo_refresh_admin * 1000,
+                key="datarefresh"
+            )
         
         if not verificar_conexion_bd():
             st.error("❌ No hay conexión a la base de datos. No se puede cargar el panel.")
@@ -1460,6 +1345,20 @@ if st.session_state.rol == "admin":
                             
                             df_admin = df_base.copy() if sel_admin == "🌍 Todo" else df_base[df_base['ruta'] == sel_admin.strip()].copy()
                             
+                            # Filtros adicionales
+                            col_f1, col_f2 = st.columns(2)
+                            with col_f1:
+                                fecha_inicio = st.date_input("Fecha inicio", datetime.now() - timedelta(days=30))
+                            with col_f2:
+                                fecha_fin = st.date_input("Fecha fin", datetime.now())
+                            
+                            if 'fecha_registro' in df_admin.columns:
+                                df_admin['fecha_registro'] = pd.to_datetime(df_admin['fecha_registro'])
+                                df_admin = df_admin[
+                                    (df_admin['fecha_registro'] >= pd.Timestamp(fecha_inicio)) &
+                                    (df_admin['fecha_registro'] <= pd.Timestamp(fecha_fin))
+                                ]
+                            
                             st.markdown("### ✏️ Editar Cliente")
                             
                             lista_clientes_edit = df_base.sort_values(by="nombre_cliente")
@@ -1477,13 +1376,24 @@ if st.session_state.rol == "admin":
                             
                             col_btn1, col_btn2 = st.columns(2)
                             with col_btn1:
-                                if st.button("🔍 Cargar para Edición", use_container_width=True):
+                                if st.button(txt['editar'], use_container_width=True):
                                     st.session_state.id_cliente_editar = id_seleccionado
                             
                             with col_btn2:
-                                if st.button("🗑️ Eliminar Cliente", use_container_width=True):
+                                if st.button(txt['eliminar'], use_container_width=True):
                                     datos_elim = df_base[df_base['id'] == id_seleccionado].iloc[0]
-                                    dialogo_eliminar_cliente(id_seleccionado, datos_elim['nombre_cliente'])
+                                    st.error(f"⚠️ ¿Eliminar permanentemente a **{datos_elim['nombre_cliente']}**?")
+                                    if st.button("✅ Sí, eliminar", key="confirmar_eliminar"):
+                                        with get_db() as db_del:
+                                            if db_del:
+                                                cursor = db_del.cursor()
+                                                cursor.execute("DELETE FROM pedidos WHERE id = %s", (id_seleccionado,))
+                                                db_del.commit()
+                                                cursor.close()
+                                                registrar_accion("admin", f"Eliminó cliente: {datos_elim['nombre_cliente']}")
+                                                st.success("✅ Cliente eliminado")
+                                                time.sleep(1)
+                                                st.rerun()
                             
                             if st.session_state.id_cliente_editar:
                                 datos_c = df_base[df_base['id'] == st.session_state.id_cliente_editar].iloc[0]
@@ -1524,6 +1434,7 @@ if st.session_state.rol == "admin":
                                             )
                                             db.commit()
                                             cursor_up.close()
+                                            registrar_accion("admin", f"Editó cliente: {nuevo_nombre}")
                                             st.success("✅ Datos actualizados correctamente.")
                                             st.session_state.id_cliente_editar = None
                                             time.sleep(1)
@@ -1539,7 +1450,18 @@ if st.session_state.rol == "admin":
                             col_r1, col_r2 = st.columns(2)
                             with col_r1:
                                 if st.button("🚨 REINICIAR TODAS LAS RUTAS", use_container_width=True, type="primary"):
-                                    dialogo_reiniciar_todo()
+                                    st.error("⚠️ Esta acción marcará TODOS los pedidos como 'pendiente'.")
+                                    if st.button("✅ Sí, reiniciar todo", key="confirmar_reinicio_todo"):
+                                        with get_db() as db_reset:
+                                            if db_reset:
+                                                cursor = db_reset.cursor()
+                                                cursor.execute("UPDATE pedidos SET estatus = 'pendiente'")
+                                                db_reset.commit()
+                                                cursor.close()
+                                                registrar_accion("admin", "Reinició todas las rutas")
+                                                st.success("✅ Todos los pedidos reiniciados")
+                                                time.sleep(1)
+                                                st.rerun()
                             
                             with col_r2:
                                 ruta_a_reiniciar = st.selectbox(
@@ -1549,22 +1471,40 @@ if st.session_state.rol == "admin":
                                 )
                                 if ruta_a_reiniciar != "-- Seleccionar --":
                                     if st.button(f"🔄 Reiniciar: {ruta_a_reiniciar}", use_container_width=True):
-                                        dialogo_reiniciar_ruta(ruta_a_reiniciar)
+                                        st.error(f"⚠️ ¿Reiniciar todos los pedidos de **'{ruta_a_reiniciar}'**?")
+                                        if st.button("✅ Sí, reiniciar", key="confirmar_reinicio_ruta"):
+                                            if reiniciar_ruta_completa(ruta_a_reiniciar):
+                                                registrar_accion("admin", f"Reinició ruta: {ruta_a_reiniciar}")
+                                                st.success(f"✅ Ruta '{ruta_a_reiniciar}' reiniciada")
+                                                time.sleep(1)
+                                                st.rerun()
                             
                             st.divider()
                             
                             st.markdown("### 📋 Tabla de Pedidos")
                             st.dataframe(df_admin, use_container_width=True)
                             
-                            excel_data = exportar_excel(df_admin)
-                            fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-                            st.download_button(
-                                label="📥 Exportar a Excel",
-                                data=excel_data,
-                                file_name=f"pedidos_viteg_{fecha_hoy}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
+                            # Exportar en múltiples formatos
+                            col_exp1, col_exp2, col_exp3 = st.columns(3)
+                            with col_exp1:
+                                excel_data = exportar_excel(df_admin)
+                                fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+                                st.download_button(
+                                    label="📥 Exportar a Excel",
+                                    data=excel_data,
+                                    file_name=f"pedidos_viteg_{fecha_hoy}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                            with col_exp2:
+                                csv_data = exportar_csv(df_admin)
+                                st.download_button(
+                                    label="📥 Exportar a CSV",
+                                    data=csv_data,
+                                    file_name=f"pedidos_viteg_{fecha_hoy}.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
                     except Exception as e:
                         st.error(f"❌ Error en panel administrador: {e}")
 
@@ -1581,22 +1521,62 @@ if st.session_state.rol == "admin":
                         df_rep = pd.read_sql("SELECT * FROM pedidos", db)
                         
                         if not df_rep.empty:
+                            # Métricas principales
                             total_20 = df_rep['cantidad_20L'].sum()
                             total_10 = df_rep['cantidad_10L'].sum()
                             total_clientes = len(df_rep)
                             entregados = len(df_rep[df_rep['estatus'] == 'entregado'])
                             
                             c1, c2, c3, c4 = st.columns(4)
-                            c1.metric("👥 Total Clientes", total_clientes)
-                            c2.metric("💧 Garrafones 20L", int(total_20))
-                            c3.metric("💧 Garrafones 10L", int(total_10))
+                            c1.metric(txt['clientes'], total_clientes)
+                            c2.metric(txt['garrafones_20'], int(total_20))
+                            c3.metric(txt['garrafones_10'], int(total_10))
                             c4.metric(
-                                "✅ Tasa de entrega", 
+                                txt['tasa_entrega'], 
                                 f"{int((entregados/total_clientes)*100)}%" if total_clientes > 0 else "0%"
                             )
                             
                             st.divider()
                             
+                            # Gráficos interactivos con Plotly
+                            st.markdown("### 📊 Análisis Visual")
+                            
+                            col_g1, col_g2 = st.columns(2)
+                            
+                            with col_g1:
+                                # Gráfico de pastel - Distribución por ruta
+                                df_ruta_count = df_rep.groupby('ruta').size().reset_index(name='count')
+                                fig_pie = px.pie(
+                                    df_ruta_count, 
+                                    values='count', 
+                                    names='ruta',
+                                    title='Distribución de Pedidos por Ruta',
+                                    color_discrete_sequence=px.colors.qualitative.Set3
+                                )
+                                fig_pie.update_layout(height=400)
+                                st.plotly_chart(fig_pie, use_container_width=True)
+                            
+                            with col_g2:
+                                # Gráfico de barras - Garrafones por ruta
+                                df_ruta_garrafones = df_rep.groupby('ruta').agg({
+                                    'cantidad_20L': 'sum',
+                                    'cantidad_10L': 'sum'
+                                }).reset_index()
+                                
+                                fig_bar = px.bar(
+                                    df_ruta_garrafones, 
+                                    x='ruta', 
+                                    y=['cantidad_20L', 'cantidad_10L'],
+                                    title='Garrafones por Ruta',
+                                    barmode='group',
+                                    color_discrete_sequence=['#1a73e8', '#25D366']
+                                )
+                                fig_bar.update_layout(height=400)
+                                st.plotly_chart(fig_bar, use_container_width=True)
+                            
+                            st.divider()
+                            
+                            # Reporte por ruta
                             df_por_ruta = df_rep.groupby('ruta').agg(
                                 Clientes=('id', 'count'),
                                 Garrafones_20L=('cantidad_20L', 'sum'),
@@ -1608,17 +1588,9 @@ if st.session_state.rol == "admin":
                             
                             st.dataframe(df_por_ruta, use_container_width=True)
                             
-                            col_g1, col_g2 = st.columns(2)
-                            with col_g1:
-                                st.subheader("📊 Clientes por Ruta")
-                                st.bar_chart(df_por_ruta.set_index('ruta')['Clientes'])
-                            
-                            with col_g2:
-                                st.subheader("📊 Garrafones 20L por Ruta")
-                                st.bar_chart(df_por_ruta.set_index('ruta')['Garrafones_20L'])
-                            
                             st.divider()
                             
+                            # Ventas por repartidor
                             st.markdown("### 🚴 Garrafones entregados por Repartidor")
                             st.caption("💡 Usa el nombre de la **Ruta** como identificador del repartidor")
                             
@@ -1640,7 +1612,18 @@ if st.session_state.rol == "admin":
                                 )
                                 
                                 st.dataframe(df_por_repartidor, use_container_width=True)
-                                st.bar_chart(df_por_repartidor.set_index('Repartidor / Ruta')['Total_garrafones'])
+                                
+                                # Gráfico de barras - Repartidores
+                                fig_repartidores = px.bar(
+                                    df_por_repartidor,
+                                    x='Repartidor / Ruta',
+                                    y='Total_garrafones',
+                                    title='Total de Garrafones por Repartidor',
+                                    color='Total_garrafones',
+                                    color_continuous_scale='Viridis'
+                                )
+                                fig_repartidores.update_layout(height=400)
+                                st.plotly_chart(fig_repartidores, use_container_width=True)
                                 
                                 excel_repartidores = exportar_excel(df_por_repartidor)
                                 st.download_button(
@@ -1656,6 +1639,7 @@ if st.session_state.rol == "admin":
                             
                             st.divider()
                             
+                            # Top clientes
                             st.markdown("### 🏆 Top 10 Clientes por Garrafones")
                             df_rep['total_garrafones'] = df_rep['cantidad_20L'] + df_rep['cantidad_10L']
                             df_top = df_rep.nlargest(
@@ -1665,14 +1649,26 @@ if st.session_state.rol == "admin":
                                'total_garrafones', 'estatus']]
                             st.dataframe(df_top, use_container_width=True)
                             
-                            excel_reporte = exportar_excel(df_por_ruta)
-                            st.download_button(
-                                label="📥 Exportar Reporte Completo",
-                                data=excel_reporte,
-                                file_name=f"reporte_viteg_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
+                            # Exportar reporte completo
+                            col_exp1, col_exp2 = st.columns(2)
+                            with col_exp1:
+                                excel_reporte = exportar_excel(df_por_ruta)
+                                st.download_button(
+                                    label="📥 Exportar Reporte Completo",
+                                    data=excel_reporte,
+                                    file_name=f"reporte_viteg_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                            with col_exp2:
+                                csv_reporte = exportar_csv(df_por_ruta)
+                                st.download_button(
+                                    label="📥 Exportar Reporte en CSV",
+                                    data=csv_reporte,
+                                    file_name=f"reporte_viteg_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
                         else:
                             st.info("ℹ️ No hay datos suficientes para generar reportes.")
                             
@@ -1734,10 +1730,10 @@ else:
                                     total_ruta_completa = len(df_todos)
                             
                             c1, c2, c3 = st.columns(3)
-                            c1.metric("📦 Pendientes", total_ruta)
-                            c2.metric("✅ Entregados", entregados_hoy)
+                            c1.metric(txt['pendientes'], total_ruta)
+                            c2.metric(txt['entregados'], entregados_hoy)
                             progreso = int((entregados_hoy / total_ruta_completa) * 100) if total_ruta_completa > 0 else 0
-                            c3.metric("📊 Progreso", f"{progreso}%")
+                            c3.metric(txt['progreso'], f"{progreso}%")
                             st.progress(progreso / 100)
                             st.divider()
                             
@@ -1750,7 +1746,7 @@ else:
                             
                             col_opt1, col_opt2, col_opt3 = st.columns(3)
                             with col_opt1:
-                                if st.button("🧭 OPTIMIZAR CON IA", use_container_width=True, type="primary", key="opt_rep"):
+                                if st.button(txt['optimizar'], use_container_width=True, type="primary", key="opt_rep"):
                                     if len(coords_validas) >= 2:
                                         df_optimizado = pd.concat([
                                             optimizar_ruta(coords_validas),
@@ -1765,11 +1761,11 @@ else:
                                         st.warning("⚠️ Se necesitan al menos 2 clientes con GPS.")
                             
                             with col_opt2:
-                                if st.button("✋ AJUSTAR MANUALMENTE", use_container_width=True, key="rea_rep"):
+                                if st.button(txt['reordenar'], use_container_width=True, key="rea_rep"):
                                     st.session_state.modo_reordenar = True
                             
                             with col_opt3:
-                                if st.button("↩️ Orden original", use_container_width=True, key="ori_rep"):
+                                if st.button(txt['original'], use_container_width=True, key="ori_rep"):
                                     st.session_state.ruta_optimizada = False
                                     st.session_state.df_ruta_ordenada = None
                                     st.session_state.orden_manual = None
@@ -1870,7 +1866,7 @@ else:
                                             f'<a href="{url_gmaps}" target="_blank">'
                                             f'<button style="background-color:#1a73e8;color:white;border:none;'
                                             f'padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">'
-                                            f'🗺️ NAVEGAR</button></a>',
+                                            f'{txt["navegar"]}</button></a>',
                                             unsafe_allow_html=True
                                         )
                                     
@@ -1881,7 +1877,7 @@ else:
                                                 f'<a href="tel:{num_tel}">'
                                                 f'<button style="background-color:#007BFF;color:white;border:none;'
                                                 f'padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">'
-                                                f'📞 LLAMAR</button></a>',
+                                                f'{txt["llamar"]}</button></a>',
                                                 unsafe_allow_html=True
                                             )
                                         with c2:
@@ -1907,7 +1903,7 @@ else:
                                     
                                     col_e1, col_e2 = st.columns(2)
                                     with col_e1:
-                                        if st.button("✅ Marcar Entregado", key=f"ent_r_{row['id']}"):
+                                        if st.button(txt['entregado'], key=f"ent_r_{row['id']}"):
                                             cursor = db.cursor()
                                             cursor.execute(
                                                 "UPDATE pedidos SET estatus = 'entregado' WHERE id = %s",
@@ -1917,11 +1913,12 @@ else:
                                             cursor.close()
                                             st.session_state.ruta_optimizada = False
                                             st.session_state.df_ruta_ordenada = None
+                                            registrar_accion("repartidor", f"Marcó como entregado: {row['nombre_cliente']}")
                                             st.rerun()
                                     
                                     with col_e2:
                                         if row['estatus'] != 'no encontrado':
-                                            if st.button("❌ No Encontrado", key=f"noe_r_{row['id']}"):
+                                            if st.button(txt['no_encontrado'], key=f"noe_r_{row['id']}"):
                                                 cursor = db.cursor()
                                                 cursor.execute(
                                                     "UPDATE pedidos SET estatus = 'no encontrado' WHERE id = %s",
@@ -1929,6 +1926,7 @@ else:
                                                 )
                                                 db.commit()
                                                 cursor.close()
+                                                registrar_accion("repartidor", f"Marcó como no encontrado: {row['nombre_cliente']}")
                                                 st.rerun()
                         else:
                             st.success("🚚 ¡No hay pedidos pendientes!")
@@ -1938,7 +1936,7 @@ else:
 
     # --- REGISTRO REPARTIDOR ---
     if seccion_rep == "📝 Registrar Cliente":
-        st.subheader("📝 Registrar Cliente")
+        st.subheader(txt['registrar'])
         
         if not verificar_conexion_bd():
             st.error("❌ No hay conexión a la base de datos. No se puede registrar.")
@@ -1957,7 +1955,7 @@ else:
                         pass
             
             st.markdown("### 🔍 Buscador de Clientes")
-            busqueda_r = st.text_input("Buscar por nombre o teléfono:", key="busqueda_rep")
+            busqueda_r = st.text_input(f"{txt['buscar']} por nombre o teléfono:", key="busqueda_rep")
             
             if busqueda_r:
                 with get_db() as db_bus:
@@ -2007,7 +2005,7 @@ else:
                         height=100
                     )
                 
-                if st.form_submit_button("💾 Guardar", use_container_width=True, type="primary"):
+                if st.form_submit_button(txt['guardar'], use_container_width=True, type="primary"):
                     if not nom_r or not nom_r.strip():
                         st.error("❌ El nombre del cliente es obligatorio")
                     elif not rut_r or not rut_r.strip():
@@ -2028,6 +2026,7 @@ else:
                                     )
                                     db_alta.commit()
                                     cursor_a.close()
+                                    registrar_accion("repartidor", f"Registró cliente: {nom_r}")
                                     st.success(f"🎉 '{nom_r}' registrado en ruta: {rut_r}")
                                     time.sleep(1)
                                     st.rerun()
