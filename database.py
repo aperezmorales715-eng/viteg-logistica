@@ -71,3 +71,5 @@ def registrar_accion_sqlite(usuario, accion):
 
 # Inicializar la base de datos al importar
 inicializar_bd()
+
+Agregar database.py para SQLite
